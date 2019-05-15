@@ -17,8 +17,8 @@ specific language governing permissions and limitations
 under the License.
 */
 
-// +k8s:deepcopy-gen=package
+package kvswitch
 
-// Package v1alpha1 is the v1alpha1 version of the API.
-// +groupName=kubeovs.io
-package v1alpha1
+const (
+	GroupName = "kvswitch.io"
+)

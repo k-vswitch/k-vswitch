@@ -32,6 +32,6 @@ CODEGEN_PKG=~/go/src/k8s.io/code-generator
 #                  k8s.io/kubernetes. The output-base is needed for the generators to output into the vendor dir
 #                  instead of the $GOPATH directly. For normal projects this can be dropped.
 "${CODEGEN_PKG}"/generate-groups.sh all \
-  github.com/kube-ovs/kube-ovs/apis/generated github.com/kube-ovs/kube-ovs/apis \
-  kubeovs:v1alpha1 \
+  github.com/k-vswitch/k-vswitch/apis/generated github.com/k-vswitch/k-vswitch/apis \
+  kvswitch:v1alpha1 \
   --go-header-file "${SCRIPT_ROOT}"/hack/headers.go.txt

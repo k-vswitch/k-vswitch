@@ -1,9 +1,9 @@
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
-  name: vswitchconfigs.kubeovs.io
+  name: vswitchconfigs.kvswitch.io
 spec:
-  group: kubeovs.io
+  group: kvswitch.io
   version: v1alpha1
   names:
     kind: VSwitchConfig
@@ -14,14 +14,14 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: kube-ovs
+  name: k-vswitch
   namespace: kube-system
 
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: kube-ovs
+  name: k-vswitch
 rules:
   - apiGroups:
     - ""
@@ -35,7 +35,7 @@ rules:
       - get
       - watch
   - apiGroups:
-    - "kubeovs.io"
+    - "kvswitch.io"
     resources:
       - vswitchconfigs
     verbs:
@@ -51,70 +51,70 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: kube-ovs
+  name: k-vswitch
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: kube-ovs
+  name: k-vswitch
 subjects:
 - kind: ServiceAccount
-  name: kube-ovs
+  name: k-vswitch
   namespace: kube-system
 
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: kube-ovs-controller
+  name: k-vswitch-controller
   namespace: kube-system
 spec:
   replicas: 1
   updateStrategy: 
     type: RollingUpdate
-  serviceName: kube-ovs-controller
+  serviceName: k-vswitch-controller
   selector:
     matchLabels:
-      k8s-app: kube-ovs-controller
+      k8s-app: k-vswitch-controller
   template:
     metadata:
       labels:
-        k8s-app: kube-ovs-controller
+        k8s-app: k-vswitch-controller
     spec:
       tolerations:
       - key: "node-role.kubernetes.io/master"
         effect: NoSchedule
       hostNetwork: true
-      serviceAccountName: kube-ovs
+      serviceAccountName: k-vswitch
       containers:
-      - name: kube-ovs-controller
-        image: andrewsykim/kube-ovs:latest
+      - name: k-vswitch-controller
+        image: kvswitch/k-vswitch:latest
         imagePullPolicy: Always
         command:
-         - "/bin/kube-ovs-controller"
+         - "/bin/k-vswitch-controller"
 
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   labels:
-    k8s-app: kube-ovs
-  name: kube-ovs
+    k8s-app: k-vswitchd
+  name: k-vswitchd
   namespace: kube-system
 spec:
   selector:
     matchLabels:
-      k8s-app: kube-ovs
+      k8s-app: k-vswitchd
   template:
     metadata:
       labels:
-        k8s-app: kube-ovs
+        k8s-app: k-vswitchd
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      serviceAccountName: kube-ovs
+      serviceAccountName: k-vswitch
       containers:
-      - name: kube-ovs
-        image: andrewsykim/kube-ovs:latest
+      - name: k-vswitchd
+        image: kvswitch/k-vswitch:latest
         imagePullPolicy: Always
         env:
         - name: NODE_NAME
@@ -136,13 +136,13 @@ spec:
             name: lib-modules
       initContainers:
       - name: install-cni
-        image: andrewsykim/kube-ovs:latest
+        image: kvswitch/k-vswitch:latest
         command:
         - /bin/sh
         - -c
         - |
           set -e -x;
-          cp /bin/kube-ovs-cni /opt/cni/bin/
+          cp /bin/k-vswitch-cni /opt/cni/bin/
         volumeMounts:
         - mountPath: /opt/cni/bin
           name: cni-bin-dir

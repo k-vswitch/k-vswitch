@@ -22,7 +22,7 @@ under the License.
 package fake
 
 import (
-	kubeovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -34,7 +34,7 @@ var scheme = runtime.NewScheme()
 var codecs = serializer.NewCodecFactory(scheme)
 var parameterCodec = runtime.NewParameterCodec(scheme)
 var localSchemeBuilder = runtime.SchemeBuilder{
-	kubeovsv1alpha1.AddToScheme,
+	kvswitchv1alpha1.AddToScheme,
 }
 
 // AddToScheme adds all types of this clientset into the given scheme. This allows composition

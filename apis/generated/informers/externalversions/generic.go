@@ -24,7 +24,7 @@ package externalversions
 import (
 	"fmt"
 
-	v1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	v1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
 )
@@ -55,9 +55,9 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=kubeovs.io, Version=v1alpha1
+	// Group=kvswitch.io, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithResource("vswitchconfigs"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Kubeovs().V1alpha1().VSwitchConfigs().Informer()}, nil
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Kvswitch().V1alpha1().VSwitchConfigs().Informer()}, nil
 
 	}
 

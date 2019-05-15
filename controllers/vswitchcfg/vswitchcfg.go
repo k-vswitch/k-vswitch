@@ -23,10 +23,10 @@ import (
 	"errors"
 	"fmt"
 
-	kovs "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned"
-	kovsinformers "github.com/kube-ovs/kube-ovs/apis/generated/informers/externalversions/kubeovs/v1alpha1"
-	kovslister "github.com/kube-ovs/kube-ovs/apis/generated/listers/kubeovs/v1alpha1"
-	kovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	kvswitch "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned"
+	kvswitchinformers "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions/kvswitch/v1alpha1"
+	kvswitchlister "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierr "k8s.io/apimachinery/pkg/api/errors"
@@ -45,28 +45,28 @@ type vswitchConfig struct {
 	clusterCIDR string
 	serviceCIDR string
 
-	kovsClient kovs.Interface
-	kubeClient kubernetes.Interface
+	kvswitchClient kvswitch.Interface
+	kubeClient     kubernetes.Interface
 
-	vswitchLister kovslister.VSwitchConfigLister
+	vswitchLister kvswitchlister.VSwitchConfigLister
 	nodeLister    v1lister.NodeLister
 }
 
 func NewVSwitchConfigController(
-	vswitchInformer kovsinformers.VSwitchConfigInformer,
+	vswitchInformer kvswitchinformers.VSwitchConfigInformer,
 	nodeInformer v1informer.NodeInformer,
 	kubeClient kubernetes.Interface,
-	kovsClient kovs.Interface,
+	kvswitchClient kvswitch.Interface,
 	overlayType, clusterCIDR, serviceCIDR string) *vswitchConfig {
 
 	v := &vswitchConfig{
-		overlayType:   overlayType,
-		clusterCIDR:   clusterCIDR,
-		serviceCIDR:   serviceCIDR,
-		kovsClient:    kovsClient,
-		kubeClient:    kubeClient,
-		vswitchLister: vswitchInformer.Lister(),
-		nodeLister:    nodeInformer.Lister(),
+		overlayType:    overlayType,
+		clusterCIDR:    clusterCIDR,
+		serviceCIDR:    serviceCIDR,
+		kvswitchClient: kvswitchClient,
+		kubeClient:     kubeClient,
+		vswitchLister:  vswitchInformer.Lister(),
+		nodeLister:     nodeInformer.Lister(),
 	}
 
 	return v
@@ -123,7 +123,7 @@ func (v *vswitchConfig) OnDelete(obj interface{}) {
 		klog.Errorf("obj %v was not core/v1 node", obj)
 	}
 
-	err := v.kovsClient.KubeovsV1alpha1().VSwitchConfigs().Delete(node.Name, &metav1.DeleteOptions{})
+	err := v.kvswitchClient.KvswitchV1alpha1().VSwitchConfigs().Delete(node.Name, &metav1.DeleteOptions{})
 	if err != nil {
 		klog.Errorf("error syncing VSwitchConfig: %v", err)
 	}
@@ -187,7 +187,7 @@ func (v *vswitchConfig) syncVSwitchConfig(node *corev1.Node) error {
 	if apierr.IsNotFound(err) {
 		vswitchCfg := nodeToVSwitchConfig(node, v.overlayType, overlayIP,
 			nodePodCIDR, v.clusterCIDR, v.serviceCIDR)
-		_, err = v.kovsClient.KubeovsV1alpha1().VSwitchConfigs().Create(vswitchCfg)
+		_, err = v.kvswitchClient.KvswitchV1alpha1().VSwitchConfigs().Create(vswitchCfg)
 		return err
 	}
 
@@ -202,17 +202,17 @@ func (v *vswitchConfig) syncVSwitchConfig(node *corev1.Node) error {
 	newVSwitchCfg.Spec.ClusterCIDR = v.clusterCIDR
 	newVSwitchCfg.Spec.ServiceCIDR = v.serviceCIDR
 
-	_, err = v.kovsClient.KubeovsV1alpha1().VSwitchConfigs().Update(newVSwitchCfg)
+	_, err = v.kvswitchClient.KvswitchV1alpha1().VSwitchConfigs().Update(newVSwitchCfg)
 	return err
 }
 
 func nodeToVSwitchConfig(node *corev1.Node, overlayType, overlayIP,
-	podCIDR, clusterCIDR, serviceCIDR string) *kovsv1alpha1.VSwitchConfig {
-	return &kovsv1alpha1.VSwitchConfig{
+	podCIDR, clusterCIDR, serviceCIDR string) *kvswitchv1alpha1.VSwitchConfig {
+	return &kvswitchv1alpha1.VSwitchConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: node.Name,
 		},
-		Spec: kovsv1alpha1.VSwitchConfigSpec{
+		Spec: kvswitchv1alpha1.VSwitchConfigSpec{
 			OverlayIP:   overlayIP,
 			OverlayType: overlayType,
 			PodCIDR:     podCIDR,

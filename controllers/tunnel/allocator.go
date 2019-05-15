@@ -24,10 +24,10 @@ import (
 	"fmt"
 	"sync"
 
-	kovs "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned"
-	kovsinformers "github.com/kube-ovs/kube-ovs/apis/generated/informers/externalversions/kubeovs/v1alpha1"
-	kovslisters "github.com/kube-ovs/kube-ovs/apis/generated/listers/kubeovs/v1alpha1"
-	kovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	kvswitch "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned"
+	kvswitchinformers "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions/kvswitch/v1alpha1"
+	kvswitchlisters "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
@@ -43,24 +43,24 @@ type tunnelIDAllocactor struct {
 	// mutex ensures only 1 tunnel ID is being allocated at a time
 	allocatorLock sync.Mutex
 
-	kovsClientset kovs.Interface
-	vswitchLister kovslisters.VSwitchConfigLister
+	kvswitchClientset kvswitch.Interface
+	vswitchLister     kvswitchlisters.VSwitchConfigLister
 }
 
-func NewTunnelIDAllocator(kovsClient kovs.Interface,
-	vswitchInformer kovsinformers.VSwitchConfigInformer) *tunnelIDAllocactor {
+func NewTunnelIDAllocator(kvswitchClient kvswitch.Interface,
+	vswitchInformer kvswitchinformers.VSwitchConfigInformer) *tunnelIDAllocactor {
 	t := &tunnelIDAllocactor{
-		kovsClientset: kovsClient,
-		vswitchLister: vswitchInformer.Lister(),
+		kvswitchClientset: kvswitchClient,
+		vswitchLister:     vswitchInformer.Lister(),
 	}
 
 	return t
 }
 
 func (t *tunnelIDAllocactor) OnAdd(obj interface{}) {
-	vswitchcfg, ok := obj.(*kovsv1alpha1.VSwitchConfig)
+	vswitchcfg, ok := obj.(*kvswitchv1alpha1.VSwitchConfig)
 	if !ok {
-		klog.Errorf("obj %v was not kubeovs/v1alpha1 VSwitchConfig", obj)
+		klog.Errorf("obj %v was not kvswitch/v1alpha1 VSwitchConfig", obj)
 		return
 	}
 
@@ -76,9 +76,9 @@ func (t *tunnelIDAllocactor) OnAdd(obj interface{}) {
 }
 
 func (t *tunnelIDAllocactor) OnUpdate(oldObj, newObj interface{}) {
-	vswitchcfg, ok := newObj.(*kovsv1alpha1.VSwitchConfig)
+	vswitchcfg, ok := newObj.(*kvswitchv1alpha1.VSwitchConfig)
 	if !ok {
-		klog.Errorf("obj %v was not kubeovs/v1alpha1 VSwitchConfig", newObj)
+		klog.Errorf("obj %v was not kvswitch/v1alpha1 VSwitchConfig", newObj)
 		return
 	}
 
@@ -94,19 +94,19 @@ func (t *tunnelIDAllocactor) OnUpdate(oldObj, newObj interface{}) {
 }
 
 func (t *tunnelIDAllocactor) OnDelete(obj interface{}) {
-	_, ok := obj.(*kovsv1alpha1.VSwitchConfig)
+	_, ok := obj.(*kvswitchv1alpha1.VSwitchConfig)
 	if !ok {
-		klog.Errorf("obj %v was not kubeovs/v1alpha1 VSwitchConfig", obj)
+		klog.Errorf("obj %v was not kvswitch/v1alpha1 VSwitchConfig", obj)
 		return
 	}
 }
 
-func (t *tunnelIDAllocactor) allocateTunnelID(vswitchcfg *kovsv1alpha1.VSwitchConfig) error {
+func (t *tunnelIDAllocactor) allocateTunnelID(vswitchcfg *kvswitchv1alpha1.VSwitchConfig) error {
 	t.allocatorLock.Lock()
 	defer t.allocatorLock.Unlock()
 
 	// fetch the VSwitchConfig resource one more time to ensure it doesn't exist before we try to allocate one.
-	vswitchcfg, err := t.kovsClientset.KubeovsV1alpha1().VSwitchConfigs().Get(vswitchcfg.Name, metav1.GetOptions{})
+	vswitchcfg, err := t.kvswitchClientset.KvswitchV1alpha1().VSwitchConfigs().Get(vswitchcfg.Name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("error refetching vswitch config: %v", err)
 	}
@@ -130,7 +130,7 @@ func (t *tunnelIDAllocactor) allocateTunnelID(vswitchcfg *kovsv1alpha1.VSwitchCo
 
 	newVSwitchCfg := vswitchcfg.DeepCopy()
 	newVSwitchCfg.Spec.OverlayTunnelID = candTunID
-	_, err = t.kovsClientset.KubeovsV1alpha1().VSwitchConfigs().Update(newVSwitchCfg)
+	_, err = t.kvswitchClientset.KvswitchV1alpha1().VSwitchConfigs().Update(newVSwitchCfg)
 	if err != nil {
 		return fmt.Errorf("error updating vswitch config with tunnel ID: %v", err)
 	}
@@ -139,7 +139,7 @@ func (t *tunnelIDAllocactor) allocateTunnelID(vswitchcfg *kovsv1alpha1.VSwitchCo
 }
 
 func (t *tunnelIDAllocactor) getCurrentTunnelIDs() (map[int32]struct{}, error) {
-	vswitchCfgs, err := t.kovsClientset.KubeovsV1alpha1().VSwitchConfigs().List(metav1.ListOptions{})
+	vswitchCfgs, err := t.kvswitchClientset.KvswitchV1alpha1().VSwitchConfigs().List(metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}

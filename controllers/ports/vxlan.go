@@ -24,9 +24,9 @@ import (
 	"os/exec"
 	"strconv"
 
-	kovsinformers "github.com/kube-ovs/kube-ovs/apis/generated/informers/externalversions/kubeovs/v1alpha1"
-	kovslister "github.com/kube-ovs/kube-ovs/apis/generated/listers/kubeovs/v1alpha1"
-	kovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	kvswitchinformers "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions/kvswitch/v1alpha1"
+	kvswitchlister "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 
 	"k8s.io/klog"
 )
@@ -43,10 +43,10 @@ type vxlanPorts struct {
 	localOverlayIP string
 	localTunnelID  string
 
-	vswitchLister kovslister.VSwitchConfigLister
+	vswitchLister kvswitchlister.VSwitchConfigLister
 }
 
-func NewVxlanPorts(bridgeName string, vswitch *kovsv1alpha1.VSwitchConfig, vswitchInformer kovsinformers.VSwitchConfigInformer) *vxlanPorts {
+func NewVxlanPorts(bridgeName string, vswitch *kvswitchv1alpha1.VSwitchConfig, vswitchInformer kvswitchinformers.VSwitchConfigInformer) *vxlanPorts {
 	return &vxlanPorts{
 		bridgeName:     bridgeName,
 		localOverlayIP: vswitch.Spec.OverlayIP,
@@ -56,7 +56,7 @@ func NewVxlanPorts(bridgeName string, vswitch *kovsv1alpha1.VSwitchConfig, vswit
 }
 
 func (v *vxlanPorts) OnAddVSwitch(obj interface{}) {
-	vswitch, ok := obj.(*kovsv1alpha1.VSwitchConfig)
+	vswitch, ok := obj.(*kvswitchv1alpha1.VSwitchConfig)
 	if !ok {
 		return
 	}
@@ -67,7 +67,7 @@ func (v *vxlanPorts) OnAddVSwitch(obj interface{}) {
 }
 
 func (v *vxlanPorts) OnUpdateVSwitch(oldObj, newObj interface{}) {
-	vswitch, ok := newObj.(*kovsv1alpha1.VSwitchConfig)
+	vswitch, ok := newObj.(*kvswitchv1alpha1.VSwitchConfig)
 	if !ok {
 		return
 	}
@@ -78,7 +78,7 @@ func (v *vxlanPorts) OnUpdateVSwitch(oldObj, newObj interface{}) {
 }
 
 func (v *vxlanPorts) OnDeleteVSwitch(obj interface{}) {
-	_, ok := obj.(*kovsv1alpha1.VSwitchConfig)
+	_, ok := obj.(*kvswitchv1alpha1.VSwitchConfig)
 	if !ok {
 		return
 	}
@@ -86,7 +86,7 @@ func (v *vxlanPorts) OnDeleteVSwitch(obj interface{}) {
 	// TODO: handle delete case
 }
 
-func (v *vxlanPorts) addVxLANPort(vswitchConfig *kovsv1alpha1.VSwitchConfig) error {
+func (v *vxlanPorts) addVxLANPort(vswitchConfig *kvswitchv1alpha1.VSwitchConfig) error {
 	command := []string{
 		"--may-exist", "add-port", v.bridgeName, vxlanPortName,
 		"--", "set", "Interface", vxlanPortName, "type=vxlan",

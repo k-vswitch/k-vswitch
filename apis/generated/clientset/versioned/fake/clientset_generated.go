@@ -22,9 +22,9 @@ under the License.
 package fake
 
 import (
-	clientset "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned"
-	kubeovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned/typed/kubeovs/v1alpha1"
-	fakekubeovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned/typed/kubeovs/v1alpha1/fake"
+	clientset "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned/typed/kvswitch/v1alpha1"
+	fakekvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned/typed/kvswitch/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -74,7 +74,7 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 
 var _ clientset.Interface = &Clientset{}
 
-// KubeovsV1alpha1 retrieves the KubeovsV1alpha1Client
-func (c *Clientset) KubeovsV1alpha1() kubeovsv1alpha1.KubeovsV1alpha1Interface {
-	return &fakekubeovsv1alpha1.FakeKubeovsV1alpha1{Fake: &c.Fake}
+// KvswitchV1alpha1 retrieves the KvswitchV1alpha1Client
+func (c *Clientset) KvswitchV1alpha1() kvswitchv1alpha1.KvswitchV1alpha1Interface {
+	return &fakekvswitchv1alpha1.FakeKvswitchV1alpha1{Fake: &c.Fake}
 }

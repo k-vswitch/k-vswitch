@@ -1,4 +1,4 @@
-module github.com/kube-ovs/kube-ovs
+module github.com/k-vswitch/k-vswitch
 
 go 1.12
 

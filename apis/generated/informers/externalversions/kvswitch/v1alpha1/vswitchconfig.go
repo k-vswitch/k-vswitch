@@ -24,10 +24,10 @@ package v1alpha1
 import (
 	time "time"
 
-	versioned "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned"
-	internalinterfaces "github.com/kube-ovs/kube-ovs/apis/generated/informers/externalversions/internalinterfaces"
-	v1alpha1 "github.com/kube-ovs/kube-ovs/apis/generated/listers/kubeovs/v1alpha1"
-	kubeovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	versioned "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned"
+	internalinterfaces "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions/internalinterfaces"
+	v1alpha1 "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -63,16 +63,16 @@ func NewFilteredVSwitchConfigInformer(client versioned.Interface, resyncPeriod t
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.KubeovsV1alpha1().VSwitchConfigs().List(options)
+				return client.KvswitchV1alpha1().VSwitchConfigs().List(options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.KubeovsV1alpha1().VSwitchConfigs().Watch(options)
+				return client.KvswitchV1alpha1().VSwitchConfigs().Watch(options)
 			},
 		},
-		&kubeovsv1alpha1.VSwitchConfig{},
+		&kvswitchv1alpha1.VSwitchConfig{},
 		resyncPeriod,
 		indexers,
 	)
@@ -83,7 +83,7 @@ func (f *vSwitchConfigInformer) defaultInformer(client versioned.Interface, resy
 }
 
 func (f *vSwitchConfigInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&kubeovsv1alpha1.VSwitchConfig{}, f.defaultInformer)
+	return f.factory.InformerFor(&kvswitchv1alpha1.VSwitchConfig{}, f.defaultInformer)
 }
 
 func (f *vSwitchConfigInformer) Lister() v1alpha1.VSwitchConfigLister {

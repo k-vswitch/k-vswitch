@@ -1,28 +1,28 @@
-IMAGE_REPO=andrewsykim/kube-ovs
-IMAGE_TAG=v1
+IMAGE_REPO=kvswitch/k-vswitch
+IMAGE_TAG=latest
 
 all: compile build push
 
 .PHONY: compile
 compile:
 	docker run \
-	  -v $(PWD):/go/src/github.com/kube-ovs/kube-ovs \
-	  -w /go/src/github.com/kube-ovs/kube-ovs \
+	  -v $(PWD):/go/src/github.com/k-vswitch/k-vswitch \
+	  -w /go/src/github.com/k-vswitch/k-vswitch \
 	  golang:1.12 sh -c '\
 	  CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -mod=vendor \
-	  github.com/kube-ovs/kube-ovs/cmd/kube-ovs'
+	  github.com/k-vswitch/k-vswitch/cmd/k-vswitchd'
 	docker run \
-	  -v $(PWD):/go/src/github.com/kube-ovs/kube-ovs \
-	  -w /go/src/github.com/kube-ovs/kube-ovs \
+	  -v $(PWD):/go/src/github.com/k-vswitch/k-vswitch \
+	  -w /go/src/github.com/k-vswitch/k-vswitch \
 	  golang:1.12 sh -c '\
 	  CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -mod=vendor \
-	  github.com/kube-ovs/kube-ovs/cmd/kube-ovs-controller'
+	  github.com/k-vswitch/k-vswitch/cmd/k-vswitch-controller'
 	docker run \
-	  -v $(PWD):/go/src/github.com/kube-ovs/kube-ovs \
-	  -w /go/src/github.com/kube-ovs/kube-ovs \
+	  -v $(PWD):/go/src/github.com/k-vswitch/k-vswitch \
+	  -w /go/src/github.com/k-vswitch/k-vswitch \
 	  golang:1.12 sh -c '\
 	  CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -mod=vendor \
-	  github.com/kube-ovs/kube-ovs/cmd/kube-ovs-cni'
+	  github.com/k-vswitch/k-vswitch/cmd/k-vswitch-cni'
 
 .PHONY: build
 build:

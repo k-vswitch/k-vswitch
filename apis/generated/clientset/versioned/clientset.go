@@ -22,7 +22,7 @@ under the License.
 package versioned
 
 import (
-	kubeovsv1alpha1 "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned/typed/kubeovs/v1alpha1"
+	kvswitchv1alpha1 "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned/typed/kvswitch/v1alpha1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
@@ -30,19 +30,19 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	KubeovsV1alpha1() kubeovsv1alpha1.KubeovsV1alpha1Interface
+	KvswitchV1alpha1() kvswitchv1alpha1.KvswitchV1alpha1Interface
 }
 
 // Clientset contains the clients for groups. Each group has exactly one
 // version included in a Clientset.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	kubeovsV1alpha1 *kubeovsv1alpha1.KubeovsV1alpha1Client
+	kvswitchV1alpha1 *kvswitchv1alpha1.KvswitchV1alpha1Client
 }
 
-// KubeovsV1alpha1 retrieves the KubeovsV1alpha1Client
-func (c *Clientset) KubeovsV1alpha1() kubeovsv1alpha1.KubeovsV1alpha1Interface {
-	return c.kubeovsV1alpha1
+// KvswitchV1alpha1 retrieves the KvswitchV1alpha1Client
+func (c *Clientset) KvswitchV1alpha1() kvswitchv1alpha1.KvswitchV1alpha1Interface {
+	return c.kvswitchV1alpha1
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -61,7 +61,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	}
 	var cs Clientset
 	var err error
-	cs.kubeovsV1alpha1, err = kubeovsv1alpha1.NewForConfig(&configShallowCopy)
+	cs.kvswitchV1alpha1, err = kvswitchv1alpha1.NewForConfig(&configShallowCopy)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 // panics if there is an error in the config.
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	var cs Clientset
-	cs.kubeovsV1alpha1 = kubeovsv1alpha1.NewForConfigOrDie(c)
+	cs.kvswitchV1alpha1 = kvswitchv1alpha1.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
 	return &cs
@@ -86,7 +86,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.kubeovsV1alpha1 = kubeovsv1alpha1.New(c)
+	cs.kvswitchV1alpha1 = kvswitchv1alpha1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs

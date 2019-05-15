@@ -26,7 +26,7 @@ import (
 	"strings"
 
 	"github.com/Kmotiko/gofc/ofprotocol/ofp13"
-	"github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	"github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 
 	"k8s.io/klog"
 )
@@ -281,7 +281,7 @@ func newOxmArpDst(dst string) (*ofp13.OxmArpPa, error) {
 
 func addTunnelDstFlows(vswitch *v1alpha1.VSwitchConfig, podCIDR string, ofport int) error {
 	command := []string{
-		"add-flow", "kube-ovs0",
+		"add-flow", "k-vswitch0",
 		fmt.Sprintf("table=%d, priority=150,ip,tun_id=%d,nw_dst=%s,actions=set_field:%s->tun_dst,%d",
 			tableL3Forwarding,
 			vswitch.Spec.OverlayTunnelID,
@@ -297,7 +297,7 @@ func addTunnelDstFlows(vswitch *v1alpha1.VSwitchConfig, podCIDR string, ofport i
 	}
 
 	command = []string{
-		"add-flow", "kube-ovs0",
+		"add-flow", "k-vswitch0",
 		fmt.Sprintf("table=%d, priority=150,arp,tun_id=%d,nw_dst=%s,actions=set_field:%s->tun_dst,%d",
 			tableL3Forwarding,
 			vswitch.Spec.OverlayTunnelID,

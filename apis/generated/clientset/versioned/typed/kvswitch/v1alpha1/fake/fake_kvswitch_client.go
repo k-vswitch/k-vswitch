@@ -22,22 +22,22 @@ under the License.
 package fake
 
 import (
-	v1alpha1 "github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned/typed/kubeovs/v1alpha1"
+	v1alpha1 "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned/typed/kvswitch/v1alpha1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )
 
-type FakeKubeovsV1alpha1 struct {
+type FakeKvswitchV1alpha1 struct {
 	*testing.Fake
 }
 
-func (c *FakeKubeovsV1alpha1) VSwitchConfigs() v1alpha1.VSwitchConfigInterface {
+func (c *FakeKvswitchV1alpha1) VSwitchConfigs() v1alpha1.VSwitchConfigInterface {
 	return &FakeVSwitchConfigs{c}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *FakeKubeovsV1alpha1) RESTClient() rest.Interface {
+func (c *FakeKvswitchV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
 }

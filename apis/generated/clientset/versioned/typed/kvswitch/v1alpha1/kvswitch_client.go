@@ -22,28 +22,28 @@ under the License.
 package v1alpha1
 
 import (
-	"github.com/kube-ovs/kube-ovs/apis/generated/clientset/versioned/scheme"
-	v1alpha1 "github.com/kube-ovs/kube-ovs/apis/kubeovs/v1alpha1"
+	"github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned/scheme"
+	v1alpha1 "github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	rest "k8s.io/client-go/rest"
 )
 
-type KubeovsV1alpha1Interface interface {
+type KvswitchV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	VSwitchConfigsGetter
 }
 
-// KubeovsV1alpha1Client is used to interact with features provided by the kubeovs.io group.
-type KubeovsV1alpha1Client struct {
+// KvswitchV1alpha1Client is used to interact with features provided by the kvswitch.io group.
+type KvswitchV1alpha1Client struct {
 	restClient rest.Interface
 }
 
-func (c *KubeovsV1alpha1Client) VSwitchConfigs() VSwitchConfigInterface {
+func (c *KvswitchV1alpha1Client) VSwitchConfigs() VSwitchConfigInterface {
 	return newVSwitchConfigs(c)
 }
 
-// NewForConfig creates a new KubeovsV1alpha1Client for the given config.
-func NewForConfig(c *rest.Config) (*KubeovsV1alpha1Client, error) {
+// NewForConfig creates a new KvswitchV1alpha1Client for the given config.
+func NewForConfig(c *rest.Config) (*KvswitchV1alpha1Client, error) {
 	config := *c
 	if err := setConfigDefaults(&config); err != nil {
 		return nil, err
@@ -52,12 +52,12 @@ func NewForConfig(c *rest.Config) (*KubeovsV1alpha1Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &KubeovsV1alpha1Client{client}, nil
+	return &KvswitchV1alpha1Client{client}, nil
 }
 
-// NewForConfigOrDie creates a new KubeovsV1alpha1Client for the given config and
+// NewForConfigOrDie creates a new KvswitchV1alpha1Client for the given config and
 // panics if there is an error in the config.
-func NewForConfigOrDie(c *rest.Config) *KubeovsV1alpha1Client {
+func NewForConfigOrDie(c *rest.Config) *KvswitchV1alpha1Client {
 	client, err := NewForConfig(c)
 	if err != nil {
 		panic(err)
@@ -65,9 +65,9 @@ func NewForConfigOrDie(c *rest.Config) *KubeovsV1alpha1Client {
 	return client
 }
 
-// New creates a new KubeovsV1alpha1Client for the given RESTClient.
-func New(c rest.Interface) *KubeovsV1alpha1Client {
-	return &KubeovsV1alpha1Client{c}
+// New creates a new KvswitchV1alpha1Client for the given RESTClient.
+func New(c rest.Interface) *KvswitchV1alpha1Client {
+	return &KvswitchV1alpha1Client{c}
 }
 
 func setConfigDefaults(config *rest.Config) error {
@@ -85,7 +85,7 @@ func setConfigDefaults(config *rest.Config) error {
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *KubeovsV1alpha1Client) RESTClient() rest.Interface {
+func (c *KvswitchV1alpha1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
