@@ -36,8 +36,6 @@ import (
 )
 
 const (
-	defaultClusterCIDR = "100.96.0.0/11"
-	defaultServiceCIDR = "100.64.0.0/13"
 	defaultOverlayType = "vxlan"
 )
 
@@ -51,6 +49,8 @@ func main() {
 	flag.StringVar(&overlayType, "overlay-type", defaultOverlayType, "The overlay type to use, only vxlan is supported for now")
 
 	klog.InitFlags(flag.CommandLine)
+	flag.Parse()
+
 	klog.Info("starting k-vswitch-controller")
 
 	if clusterCIDR == "" {
