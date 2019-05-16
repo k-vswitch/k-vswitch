@@ -106,7 +106,7 @@ func main() {
 
 	vswitchController := vswitchcfg.NewVSwitchConfigController(vswitchInformer,
 		nodeInformer, clientset, kvswitchClientset,
-		defaultOverlayType, defaultClusterCIDR, defaultServiceCIDR)
+		overlayType, clusterCIDR, serviceCIDR)
 	nodeInformer.Informer().AddEventHandler(vswitchController)
 
 	kvswitchInformerFactory.Start(stopCh)

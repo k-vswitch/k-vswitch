@@ -163,7 +163,7 @@ func (of *OFConnect) handleConn(conn *net.TCPConn) {
 		header, err := reader.Peek(8)
 		if err != nil {
 			klog.Errorf("could not peek at message header: %v", err)
-			continue
+			return
 		}
 
 		msgLen := MessageLength(header)
@@ -175,6 +175,7 @@ func (of *OFConnect) handleConn(conn *net.TCPConn) {
 				if err != io.EOF {
 					klog.Errorf("error reading connection: %s", err.Error())
 				}
+
 				return
 			}
 
