@@ -20,11 +20,7 @@ under the License.
 package openflow
 
 import (
-	"fmt"
 	"net"
-	"os/exec"
-	"strconv"
-	"strings"
 
 	"github.com/Kmotiko/gofc/ofprotocol/ofp13"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -61,7 +57,8 @@ type controller struct {
 	hostLocalOFPort int
 	vxlanOFPort     int
 
-	flows *flows.FlowsBuffer
+	flows     *flows.FlowsBuffer
+	portCache *portCache
 
 	nodeLister    v1lister.NodeLister
 	podLister     v1lister.PodLister
@@ -102,6 +99,7 @@ func NewController(connManager connectionManager,
 		hostLocalOFPort: hostLocalOFPort,
 		vxlanOFPort:     vxlanOFPort,
 		flows:           flows.NewFlowsBuffer(),
+		portCache:       NewPortCache(),
 		nodeLister:      nodeInformer.Lister(),
 		podLister:       podInformer.Lister(),
 		vswitchLister:   kvswitchInformer.Lister(),
@@ -147,22 +145,4 @@ func (c *controller) Run() {
 		default:
 		}
 	}
-}
-
-func ofPortFromName(portName string) (int, error) {
-	command := []string{
-		"get", "Interface", portName, "ofport",
-	}
-
-	out, err := exec.Command("ovs-vsctl", command...).CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get ofport for port %q, err: %v, out: %q", portName, err, out)
-	}
-
-	ofport, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, fmt.Errorf("error converting ofport output %q to int: %v", string(out), err)
-	}
-
-	return ofport, nil
 }

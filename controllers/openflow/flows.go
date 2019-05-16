@@ -20,11 +20,8 @@ under the License.
 package openflow
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
-	"os/exec"
-	"strings"
 
 	"github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	"github.com/k-vswitch/k-vswitch/flows"
@@ -186,28 +183,20 @@ func (c *controller) flowsForPod(pod *corev1.Pod) error {
 
 	local, err := c.isLocalIP(podIP)
 	if err != nil {
-		return fmt.Errorf("error checking if IP %q is local: %v", err)
+		return fmt.Errorf("error checking if IP %q is local: %v", podIP, err)
 	}
 
 	if !local {
 		return nil
 	}
 
-	// TODO: cache port/mac info for each pod namespace/name combination
-	portName, err := findPort(pod.Namespace, pod.Name)
+	podPortInfo, err := c.portCache.GetPortInfo(pod)
 	if err != nil {
-		return fmt.Errorf("error finding port for pod %q, err: %v", pod.Name, err)
+		return fmt.Errorf("error checking port info for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
 
-	podMacAddr, err := macAddrFromPort(portName)
-	if err != nil {
-		return fmt.Errorf("error getting mac address for pod %q, err: %v", pod.Name, err)
-	}
-
-	ofport, err := ofPortFromName(portName)
-	if err != nil {
-		return fmt.Errorf("error getting ofport for port %q, err: %v", portName, err)
-	}
+	podMacAddr := podPortInfo.mac
+	ofport := podPortInfo.ofport
 
 	flow := flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
 		WithProtocol("ip").WithIPDest(podIP).WithModDlDest(podMacAddr).
@@ -229,64 +218,10 @@ func (c *controller) podNeedsUpdate(pod *corev1.Pod) (bool, error) {
 
 	local, err := c.isLocalIP(podIP)
 	if err != nil {
-		return false, fmt.Errorf("error checking if IP %q is local: %v", err)
+		return false, fmt.Errorf("error checking if IP %q is local: %v", podIP, err)
 	}
 
 	return local, nil
-}
-
-func findPort(podNamespace, podName string) (string, error) {
-	commands := []string{
-		"--format=json", "--column=name", "find", "port",
-		fmt.Sprintf("external-ids:k8s_pod_namespace=%s", podNamespace),
-		fmt.Sprintf("external-ids:k8s_pod_name=%s", podName),
-	}
-
-	out, err := exec.Command("ovs-vsctl", commands...).Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get OVS port for %s/%s, err: %v",
-			podNamespace, podName, err)
-	}
-
-	dbData := struct {
-		Data [][]string
-	}{}
-	if err = json.Unmarshal(out, &dbData); err != nil {
-		return "", err
-	}
-
-	if len(dbData.Data) == 0 {
-		// TODO: might make more sense to not return an error here since
-		// CNI delete can be called multiple times.
-		return "", fmt.Errorf("OVS port for %s/%s was not found, OVS DB data: %v, output: %q",
-			podNamespace, podName, dbData.Data, string(out))
-	}
-
-	portName := dbData.Data[0][0]
-	return portName, nil
-}
-
-func macAddrFromPort(portName string) (string, error) {
-	commands := []string{
-		"get", "port", portName, "mac",
-	}
-
-	out, err := exec.Command("ovs-vsctl", commands...).Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get MAC address from OVS port for %q, err: %v, out: %q",
-			portName, err, string(out))
-	}
-
-	// TODO: validate mac address
-	macAddr := strings.TrimSpace(string(out))
-	if len(macAddr) > 0 && macAddr[0] == '"' {
-		macAddr = macAddr[1:]
-	}
-	if len(macAddr) > 0 && macAddr[len(macAddr)-1] == '"' {
-		macAddr = macAddr[:len(macAddr)-1]
-	}
-
-	return macAddr, nil
 }
 
 func (c *controller) OnAddVSwitch(obj interface{}) {
@@ -351,8 +286,10 @@ func (c *controller) OnUpdatePod(oldObj, newObj interface{}) {
 }
 
 func (c *controller) OnDeletePod(obj interface{}) {
-	_, ok := obj.(*corev1.Pod)
+	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return
 	}
+
+	c.portCache.DelPortInfo(pod)
 }
