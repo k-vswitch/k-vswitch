@@ -21,6 +21,7 @@ package openflow
 
 import (
 	"net"
+	"sync"
 	"time"
 
 	"github.com/Kmotiko/gofc/ofprotocol/ofp13"
@@ -60,6 +61,8 @@ type controller struct {
 	vxlanOFPort     int
 
 	flows     *flows.FlowsBuffer
+	flowsLock sync.Mutex
+
 	portCache *portCache
 
 	nodeLister    v1lister.NodeLister

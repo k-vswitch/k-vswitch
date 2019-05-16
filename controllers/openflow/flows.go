@@ -47,6 +47,9 @@ const (
 )
 
 func (c *controller) syncFlows() error {
+	c.flowsLock.Lock()
+	defer c.flowsLock.Unlock()
+
 	startTime := time.Now()
 
 	// reset the flows buffer before each sync
