@@ -120,7 +120,7 @@ func (c *controller) Initialize() error {
 
 func (c *controller) Run(stopCh <-chan struct{}) {
 	fullResync := func() {
-		klog.Info("running periodic full resync for flows")
+		klog.V(5).Info("running periodic full resync for flows")
 
 		err := c.syncFlows()
 		if err != nil {

@@ -86,7 +86,7 @@ func (c *controller) syncFlows() error {
 		return fmt.Errorf("error syncing flows: %v", err)
 	}
 
-	klog.Infof("full sync for flows took %s", time.Since(startTime).String())
+	klog.V(5).Infof("full sync for flows took %s", time.Since(startTime).String())
 	return nil
 }
 

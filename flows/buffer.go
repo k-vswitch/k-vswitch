@@ -80,6 +80,6 @@ func (f *FlowsBuffer) SyncFlows(bridge string) error {
 		return fmt.Errorf("failed to sync flows: %v, out: %q", err, string(out))
 	}
 
-	klog.Infof("replace-flow took %s to run", time.Since(startTime).String())
+	klog.V(5).Infof("replace-flow took %s", time.Since(startTime).String())
 	return nil
 }
