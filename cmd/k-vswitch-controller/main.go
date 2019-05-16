@@ -93,5 +93,6 @@ func main() {
 	kvswitchInformerFactory.Start(stopCh)
 	coreInformerFactory.Start(stopCh)
 
-	select {}
+	// TODO: use context to gracefully handle shutdown
+	<-stopCh
 }

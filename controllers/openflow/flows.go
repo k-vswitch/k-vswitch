@@ -37,16 +37,15 @@ import (
 const (
 	tableClassification         = 0
 	tableLocalARP               = 10
-	tableOverlay                = 20
-	tableL3Rewrites             = 30
-	tableL3Forwarding           = 40
+	tableL3Forwarding           = 20
+	tableL2Forwarding           = 30
+	tableL3Rewrites             = 40
 	tableL2Rewrites             = 50
-	tableL2Forwarding           = 60
-	tableNetworkPoliciesIngress = 70
-	tableNetworkPoliciesEgress  = 80
-	tableProxy                  = 90
-	tableNAT                    = 100
-	tableAudit                  = 110
+	tableNetworkPoliciesIngress = 60
+	tableNetworkPoliciesEgress  = 70
+	tableProxy                  = 80
+	tableNAT                    = 90
+	tableAudit                  = 100
 )
 
 func (c *controller) syncFlows() error {
@@ -81,34 +80,48 @@ func (c *controller) syncFlows() error {
 }
 
 func (c *controller) defaultFlows() error {
+	// default to host-local if none of the following classifer flows match
 	flow := flows.NewFlow().WithTable(tableClassification).
 		WithPriority(0).
 		WithOutputPort(c.hostLocalOFPort)
 	c.flows.AddFlow(flow)
 
+	// any IP traffic for the gatetway should go back out host-local port
+	// with a dl destination rewrite to account for traffic from the overlay
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("ip").
 		WithIPDest(c.gatewayIP).WithModDlDest(c.gatewayMAC).
 		WithOutputPort(c.hostLocalOFPort)
 	c.flows.AddFlow(flow)
 
+	// traffic in the local pod CIDR should go straight to tableL2Rewrites
 	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(200).WithProtocol("arp").WithResubmit(tableLocalARP)
+		WithPriority(300).WithProtocol("ip").WithIPDest(c.podCIDR).
+		WithResubmit(tableL2Rewrites)
 	c.flows.AddFlow(flow)
 
-	flow = flows.NewFlow().WithTable(tableLocalARP).
+	// remaining IP traffic in the cluster CIDR should go to tableL3Forwarding
+	flow = flows.NewFlow().WithTable(tableClassification).
+		WithPriority(100).WithProtocol("ip").
+		WithIPDest(c.clusterCIDR).WithResubmit(tableL3Forwarding)
+	c.flows.AddFlow(flow)
+
+	// arp for the gateway IP should go back to host-local
+	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("arp").
 		WithArpDest(c.gatewayIP).WithOutputPort(c.hostLocalOFPort)
 	c.flows.AddFlow(flow)
 
-	flow = flows.NewFlow().WithTable(tableLocalARP).
-		WithPriority(100).WithProtocol("arp").
+	// arp for the local pod CIDR should go straigh to L2 rewrite
+	flow = flows.NewFlow().WithTable(tableClassification).
+		WithPriority(300).WithProtocol("arp").
 		WithArpDest(c.podCIDR).WithResubmit(tableL2Rewrites)
 	c.flows.AddFlow(flow)
 
-	flow = flows.NewFlow().WithTable(tableLocalARP).
-		WithPriority(50).WithProtocol("arp").
-		WithArpDest(c.clusterCIDR).WithResubmit(tableOverlay)
+	// arp traffic towards the cluster CIDR should go to tableL2Forwarding
+	flow = flows.NewFlow().WithTable(tableClassification).
+		WithPriority(100).WithProtocol("arp").
+		WithArpDest(c.clusterCIDR).WithResubmit(tableL2Forwarding)
 	c.flows.AddFlow(flow)
 
 	return nil
@@ -123,71 +136,32 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 	podCIDR := vswitch.Spec.PodCIDR
 
 	//
-	// flows for table 0 - classification
-	//
-
-	// traffic in the local pod CIDR should go to tableL2Rewrites
-	// TODO: put this in a separate function for "local" flows
-	flow := flows.NewFlow().WithTable(tableClassification).
-		WithPriority(300).WithProtocol("ip").WithIPDest(c.podCIDR).
-		WithResubmit(tableL2Rewrites)
-	c.flows.AddFlow(flow)
-
-	// traffic in the cluster CIDR without tunnel ID should go to tableOverlay
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(100).WithProtocol("ip").
-		WithIPDest(c.clusterCIDR).WithResubmit(tableOverlay)
-	c.flows.AddFlow(flow)
-
-	//
-	// flow for table 10 - overlay
-	//
-
-	if !isCurrentNode {
-		// IPv4
-		flow = flows.NewFlow().WithTable(tableOverlay).
-			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
-			WithTunnelIDField(vswitch.Spec.OverlayTunnelID).
-			WithResubmit(tableL3Forwarding)
-		c.flows.AddFlow(flow)
-
-		// ARP
-		flow = flows.NewFlow().WithTable(tableOverlay).
-			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
-			WithTunnelIDField(vswitch.Spec.OverlayTunnelID).
-			WithResubmit(tableL3Forwarding)
-		c.flows.AddFlow(flow)
-	}
-
-	//
 	// flow for table 30 - L3 Forwarding
 	//
 
 	// If pod cidr is not for current node, output to vxlan overlay port
 	// If pod cidr is for current node, go straight to L2 rewrites
 	if !isCurrentNode {
-		flow = flows.NewFlow().WithTable(tableL3Forwarding).
-			WithPriority(150).WithProtocol("ip").WithTunnelID(vswitch.Spec.OverlayTunnelID).
+		flow := flows.NewFlow().WithTable(tableL3Forwarding).
+			WithPriority(150).WithProtocol("ip").
 			WithIPDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
 			WithOutputPort(c.vxlanOFPort)
 		c.flows.AddFlow(flow)
 
-		flow = flows.NewFlow().WithTable(tableL3Forwarding).
-			WithPriority(150).WithProtocol("arp").WithTunnelID(vswitch.Spec.OverlayTunnelID).
+		flow = flows.NewFlow().WithTable(tableL2Forwarding).
+			WithPriority(150).WithProtocol("arp").
 			WithArpDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
 			WithOutputPort(c.vxlanOFPort)
 		c.flows.AddFlow(flow)
 
 	} else {
-		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+		flow := flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
-			WithTunnelID(vswitch.Spec.OverlayTunnelID).
 			WithResubmit(tableL2Rewrites)
 		c.flows.AddFlow(flow)
 
-		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+		flow = flows.NewFlow().WithTable(tableL2Forwarding).
 			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
-			WithTunnelID(vswitch.Spec.OverlayTunnelID).
 			WithResubmit(tableL2Rewrites)
 		c.flows.AddFlow(flow)
 	}
@@ -245,6 +219,20 @@ func (c *controller) flowsForPod(pod *corev1.Pod) error {
 	c.flows.AddFlow(flow)
 
 	return nil
+}
+
+func (c *controller) podNeedsUpdate(pod *corev1.Pod) (bool, error) {
+	podIP := pod.Status.PodIP
+	if podIP == "" {
+		return false, nil
+	}
+
+	local, err := c.isLocalIP(podIP)
+	if err != nil {
+		return false, fmt.Errorf("error checking if IP %q is local: %v", err)
+	}
+
+	return local, nil
 }
 
 func findPort(podNamespace, podName string) (string, error) {
@@ -321,6 +309,20 @@ func (c *controller) OnDeleteVSwitch(obj interface{}) {
 }
 
 func (c *controller) OnAddPod(obj interface{}) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+
+	needsUpdate, err := c.podNeedsUpdate(pod)
+	if err != nil {
+		klog.Errorf("error checking if pod needs update: %v", err)
+	}
+
+	if !needsUpdate {
+		return
+	}
+
 	if err := c.syncFlows(); err != nil {
 		klog.Errorf("error syncing pod: %v", err)
 		return
@@ -328,6 +330,20 @@ func (c *controller) OnAddPod(obj interface{}) {
 }
 
 func (c *controller) OnUpdatePod(oldObj, newObj interface{}) {
+	pod, ok := newObj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+
+	needsUpdate, err := c.podNeedsUpdate(pod)
+	if err != nil {
+		klog.Errorf("error checking if pod needs update: %v", err)
+	}
+
+	if !needsUpdate {
+		return
+	}
+
 	if err := c.syncFlows(); err != nil {
 		klog.Errorf("error syncing pod : %v", err)
 		return

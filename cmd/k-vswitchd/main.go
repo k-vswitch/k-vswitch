@@ -233,6 +233,7 @@ func main() {
 	go connectionManager.Serve()
 	go c.Run()
 
+	// TODO: use context to gracefully handle shutdown
 	<-stopCh
 }
 
