@@ -20,14 +20,17 @@ under the License.
 package openflow
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
 	"os/exec"
-	"strconv"
 	"strings"
 
-	"github.com/Kmotiko/gofc/ofprotocol/ofp13"
 	"github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
+	"github.com/k-vswitch/k-vswitch/flows"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
 )
 
@@ -44,47 +47,74 @@ const (
 	tableProxy                  = 90
 	tableNAT                    = 100
 	tableAudit                  = 110
-
-	vxlanPortName = "vxlan0"
 )
 
-func (c *controller) AddDefaultFlows(bridgeName string) error {
-	ofport, err := ofPortFromName(hostLocalPort)
+func (c *controller) syncFlows() error {
+	c.flows.Reset()
+
+	err := c.defaultFlows()
 	if err != nil {
-		return fmt.Errorf("getting host local port number: %v", err)
+		return err
 	}
 
-	instruction := ofp13.NewOfpInstructionActions(ofp13.OFPIT_APPLY_ACTIONS)
-	instruction.Actions = append(instruction.Actions, ofp13.NewOfpActionOutput(ofport, 0))
-
-	defaultLocalFlow := ofp13.NewOfpFlowModAdd(0, 0, tableClassification, 0, 0, ofp13.NewOfpMatch(),
-		[]ofp13.OfpInstruction{instruction})
-	c.connManager.Send(defaultLocalFlow)
-
-	gatewayFlows, err := c.addDataLinkFlowForGateway()
+	vswitchCfgs, err := c.vswitchLister.List(labels.Everything())
 	if err != nil {
-		return fmt.Errorf("error getting datalink flow for gateway IP %q, err: %v", c.gatewayIP)
+		return err
 	}
 
-	for _, flow := range gatewayFlows {
-		c.connManager.Send(flow)
+	for _, vswitchCfg := range vswitchCfgs {
+		err = c.flowsForVSwitch(vswitchCfg)
+		if err != nil {
+			return err
+		}
 	}
 
-	arpFlows, err := c.defaultARPFlows()
-	if err != nil {
-		return fmt.Errorf("error adding arp responder flows: %v", err)
+	pods, err := c.podLister.List(labels.Everything())
+	for _, pod := range pods {
+		err = c.flowsForPod(pod)
+		if err != nil {
+			return err
+		}
 	}
 
-	for _, flow := range arpFlows {
-		c.connManager.Send(flow)
-	}
+	return c.flows.SyncFlows(c.bridgeName)
+}
+
+func (c *controller) defaultFlows() error {
+	flow := flows.NewFlow().WithTable(tableClassification).
+		WithPriority(0).
+		WithOutputPort(c.hostLocalOFPort)
+	c.flows.AddFlow(flow)
+
+	flow = flows.NewFlow().WithTable(tableClassification).
+		WithPriority(500).WithProtocol("ip").
+		WithIPDest(c.gatewayIP).WithModDlDest(c.gatewayMAC).
+		WithOutputPort(c.hostLocalOFPort)
+	c.flows.AddFlow(flow)
+
+	flow = flows.NewFlow().WithTable(tableClassification).
+		WithPriority(200).WithProtocol("arp").WithResubmit(tableLocalARP)
+	c.flows.AddFlow(flow)
+
+	flow = flows.NewFlow().WithTable(tableLocalARP).
+		WithPriority(500).WithProtocol("arp").
+		WithArpDest(c.gatewayIP).WithOutputPort(c.hostLocalOFPort)
+	c.flows.AddFlow(flow)
+
+	flow = flows.NewFlow().WithTable(tableLocalARP).
+		WithPriority(100).WithProtocol("arp").
+		WithArpDest(c.podCIDR).WithResubmit(tableL2Rewrites)
+	c.flows.AddFlow(flow)
+
+	flow = flows.NewFlow().WithTable(tableLocalARP).
+		WithPriority(50).WithProtocol("arp").
+		WithArpDest(c.clusterCIDR).WithResubmit(tableOverlay)
+	c.flows.AddFlow(flow)
 
 	return nil
 }
 
-func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) ([]*ofp13.OfpFlowMod, error) {
-	flows := []*ofp13.OfpFlowMod{}
-
+func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 	isCurrentNode := false
 	if vswitch.Name == c.nodeName {
 		isCurrentNode = true
@@ -92,87 +122,41 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) ([]*ofp13.
 
 	podCIDR := vswitch.Spec.PodCIDR
 
-	vxlanOFPort, err := ofPortFromName(vxlanPortName)
-	if err != nil {
-		return nil, fmt.Errorf("error getting ofport for %q: %v", vxlanPortName, err)
-	}
-
-	var instruction ofp13.OfpInstruction
-
 	//
 	// flows for table 0 - classification
 	//
 
 	// traffic in the local pod CIDR should go to tableL2Rewrites
 	// TODO: put this in a separate function for "local" flows
-
-	match := ofp13.NewOfpMatch()
-	ipv4Match, err := newOxmIpv4SubnetDst(c.podCIDR)
-	if err != nil {
-		return nil, err
-	}
-	match.Append(ofp13.NewOxmEthType(0x0800))
-	match.Append(ipv4Match)
-	instruction = ofp13.NewOfpInstructionGotoTable(tableL2Rewrites)
-	flow := ofp13.NewOfpFlowModAdd(0, 0, tableClassification, 300, 0, match,
-		[]ofp13.OfpInstruction{instruction})
-	flows = append(flows, flow)
+	flow := flows.NewFlow().WithTable(tableClassification).
+		WithPriority(300).WithProtocol("ip").WithIPDest(c.podCIDR).
+		WithResubmit(tableL2Rewrites)
+	c.flows.AddFlow(flow)
 
 	// traffic in the cluster CIDR without tunnel ID should go to tableOverlay
-	match = ofp13.NewOfpMatch()
-	ipv4Match, err = newOxmIpv4SubnetDst(c.clusterCIDR)
-	if err != nil {
-		return nil, err
-	}
-	match.Append(ofp13.NewOxmEthType(0x0800))
-	match.Append(ipv4Match)
-	instruction = ofp13.NewOfpInstructionGotoTable(tableOverlay)
-	flow = ofp13.NewOfpFlowModAdd(0, 0, tableClassification, 100, 0, match,
-		[]ofp13.OfpInstruction{instruction})
-	flows = append(flows, flow)
+	flow = flows.NewFlow().WithTable(tableClassification).
+		WithPriority(100).WithProtocol("ip").
+		WithIPDest(c.clusterCIDR).WithResubmit(tableOverlay)
+	c.flows.AddFlow(flow)
 
 	//
 	// flow for table 10 - overlay
 	//
 
 	if !isCurrentNode {
-		ipv4Match, err = newOxmIpv4SubnetDst(podCIDR)
-		if err != nil {
-			return nil, err
-		}
-
 		// IPv4
-		match = ofp13.NewOfpMatch()
-		match.Append(ofp13.NewOxmEthType(0x0800))
-		match.Append(ipv4Match)
-
-		applyInstruction := ofp13.NewOfpInstructionActions(ofp13.OFPIT_APPLY_ACTIONS)
-		tunnelField := ofp13.NewOxmTunnelId(uint64(vswitch.Spec.OverlayTunnelID))
-		applyInstruction.Append(ofp13.NewOfpActionSetField(tunnelField))
-		gotoInstruction := ofp13.NewOfpInstructionGotoTable(tableL3Forwarding)
-
-		flow = ofp13.NewOfpFlowModAdd(0, 0, tableOverlay, 100, 0, match,
-			[]ofp13.OfpInstruction{applyInstruction, gotoInstruction})
-		flows = append(flows, flow)
-
-		arpMatch, err := newOxmArpDst(podCIDR)
-		if err != nil {
-			return nil, err
-		}
+		flow = flows.NewFlow().WithTable(tableOverlay).
+			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
+			WithTunnelIDField(vswitch.Spec.OverlayTunnelID).
+			WithResubmit(tableL3Forwarding)
+		c.flows.AddFlow(flow)
 
 		// ARP
-		match = ofp13.NewOfpMatch()
-		match.Append(ofp13.NewOxmEthType(0x0806))
-		match.Append(arpMatch)
-
-		applyInstruction = ofp13.NewOfpInstructionActions(ofp13.OFPIT_APPLY_ACTIONS)
-		tunnelField = ofp13.NewOxmTunnelId(uint64(vswitch.Spec.OverlayTunnelID))
-		applyInstruction.Append(ofp13.NewOfpActionSetField(tunnelField))
-		gotoInstruction = ofp13.NewOfpInstructionGotoTable(tableL3Forwarding)
-
-		flow = ofp13.NewOfpFlowModAdd(0, 0, tableOverlay, 100, 0, match,
-			[]ofp13.OfpInstruction{applyInstruction, gotoInstruction})
-		flows = append(flows, flow)
+		flow = flows.NewFlow().WithTable(tableOverlay).
+			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
+			WithTunnelIDField(vswitch.Spec.OverlayTunnelID).
+			WithResubmit(tableL3Forwarding)
+		c.flows.AddFlow(flow)
 	}
 
 	//
@@ -182,175 +166,176 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) ([]*ofp13.
 	// If pod cidr is not for current node, output to vxlan overlay port
 	// If pod cidr is for current node, go straight to L2 rewrites
 	if !isCurrentNode {
-		err = addTunnelDstFlows(vswitch, podCIDR, int(vxlanOFPort))
-		if err != nil {
-			return nil, fmt.Errorf("error adding tunnel forwarding flows: %v", err)
-		}
+		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+			WithPriority(150).WithProtocol("ip").WithTunnelID(vswitch.Spec.OverlayTunnelID).
+			WithIPDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
+			WithOutputPort(c.vxlanOFPort)
+		c.flows.AddFlow(flow)
+
+		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+			WithPriority(150).WithProtocol("arp").WithTunnelID(vswitch.Spec.OverlayTunnelID).
+			WithArpDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
+			WithOutputPort(c.vxlanOFPort)
+		c.flows.AddFlow(flow)
+
 	} else {
-		ipv4Match, err = newOxmIpv4SubnetDst(podCIDR)
-		if err != nil {
-			return nil, err
-		}
+		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
+			WithTunnelID(vswitch.Spec.OverlayTunnelID).
+			WithResubmit(tableL2Rewrites)
+		c.flows.AddFlow(flow)
 
-		match = ofp13.NewOfpMatch()
-		match.Append(ofp13.NewOxmEthType(0x0800))
-		match.Append(ipv4Match)
-		match.Append(ofp13.NewOxmTunnelId(uint64(vswitch.Spec.OverlayTunnelID)))
-		gotoInstruction := ofp13.NewOfpInstructionGotoTable(tableL2Rewrites)
-
-		flow = ofp13.NewOfpFlowModAdd(0, 0, tableL3Forwarding, 100, 0, match,
-			[]ofp13.OfpInstruction{gotoInstruction})
-		flows = append(flows, flow)
-
-		arpMatch, err := newOxmArpDst(podCIDR)
-		if err != nil {
-			return nil, err
-		}
-
-		match = ofp13.NewOfpMatch()
-		match.Append(ofp13.NewOxmEthType(0x0806))
-		match.Append(arpMatch)
-		match.Append(ofp13.NewOxmTunnelId(uint64(vswitch.Spec.OverlayTunnelID)))
-		gotoInstruction = ofp13.NewOfpInstructionGotoTable(tableL2Rewrites)
-
-		flow = ofp13.NewOfpFlowModAdd(0, 0, tableL3Forwarding, 100, 0, match,
-			[]ofp13.OfpInstruction{gotoInstruction})
-		flows = append(flows, flow)
-	}
-
-	return flows, nil
-}
-
-func ofPortFromName(portName string) (uint32, error) {
-	command := []string{
-		"get", "Interface", portName, "ofport",
-	}
-
-	out, err := exec.Command("ovs-vsctl", command...).CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get ofport for port %q, err: %v, out: %q", portName, err, out)
-	}
-
-	ofport, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, fmt.Errorf("error converting ofport output %q to int: %v", string(out), err)
-	}
-
-	return uint32(ofport), nil
-}
-
-func newOxmIpv4SubnetDst(dst string) (*ofp13.OxmIpv4, error) {
-	dstSplit := strings.Split(dst, "/")
-	if len(dstSplit) != 2 {
-		return nil, fmt.Errorf("invalid destination: %q", dst)
-	}
-
-	addr := dstSplit[0]
-	mask, err := strconv.Atoi(dstSplit[1])
-	if err != nil {
-		return nil, fmt.Errorf("invalid mask from cidr: %v", err)
-	}
-
-	ipv4Match, err := ofp13.NewOxmIpv4DstW(addr, mask)
-	if err != nil {
-		return nil, fmt.Errorf("error getting IPv4DstW match: %v", err)
-	}
-
-	return ipv4Match, nil
-}
-
-func newOxmArpDst(dst string) (*ofp13.OxmArpPa, error) {
-	dstSplit := strings.Split(dst, "/")
-	if len(dstSplit) != 2 {
-		return nil, fmt.Errorf("invalid destination: %q", dst)
-	}
-
-	addr := dstSplit[0]
-	mask, err := strconv.Atoi(dstSplit[1])
-	if err != nil {
-		return nil, fmt.Errorf("invalid mask from cidr: %v", err)
-	}
-
-	arpMatch, err := ofp13.NewOxmArpTpaW(addr, mask)
-	if err != nil {
-		return nil, fmt.Errorf("error getting IPv4DstW match: %v", err)
-	}
-
-	return arpMatch, nil
-}
-
-func addTunnelDstFlows(vswitch *v1alpha1.VSwitchConfig, podCIDR string, ofport int) error {
-	command := []string{
-		"add-flow", "k-vswitch0",
-		fmt.Sprintf("table=%d, priority=150,ip,tun_id=%d,nw_dst=%s,actions=set_field:%s->tun_dst,%d",
-			tableL3Forwarding,
-			vswitch.Spec.OverlayTunnelID,
-			podCIDR,
-			vswitch.Spec.OverlayIP,
-			ofport,
-		),
-	}
-
-	out, err := exec.Command("ovs-ofctl", command...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to add flows, err: %v, out: %q", err, out)
-	}
-
-	command = []string{
-		"add-flow", "k-vswitch0",
-		fmt.Sprintf("table=%d, priority=150,arp,tun_id=%d,nw_dst=%s,actions=set_field:%s->tun_dst,%d",
-			tableL3Forwarding,
-			vswitch.Spec.OverlayTunnelID,
-			podCIDR,
-			vswitch.Spec.OverlayIP,
-			ofport,
-		),
-	}
-
-	out, err = exec.Command("ovs-ofctl", command...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to add flows, err: %v, out: %q", err, out)
+		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
+			WithTunnelID(vswitch.Spec.OverlayTunnelID).
+			WithResubmit(tableL2Rewrites)
+		c.flows.AddFlow(flow)
 	}
 
 	return nil
 }
 
-func (c *controller) OnAddVSwitch(obj interface{}) {
-	vswitch, ok := obj.(*v1alpha1.VSwitchConfig)
-	if !ok {
-		return
-	}
-
-	flows, err := c.flowsForVSwitch(vswitch)
+func (c *controller) isLocalIP(ip string) (bool, error) {
+	_, ipnet, err := net.ParseCIDR(c.podCIDR)
 	if err != nil {
-		klog.Errorf("error getting flows for vswitch %q, err: %v", vswitch.Name, err)
-		return
+		return false, err
 	}
 
-	for _, flow := range flows {
-		c.connManager.Send(flow)
+	return ipnet.Contains(net.ParseIP(ip)), nil
+}
+
+func (c *controller) flowsForPod(pod *corev1.Pod) error {
+	podIP := pod.Status.PodIP
+	if podIP == "" {
+		return nil
+	}
+
+	local, err := c.isLocalIP(podIP)
+	if err != nil {
+		return fmt.Errorf("error checking if IP %q is local: %v", err)
+	}
+
+	if !local {
+		return nil
+	}
+
+	// TODO: cache port/mac info for each pod namespace/name combination
+	portName, err := findPort(pod.Namespace, pod.Name)
+	if err != nil {
+		return fmt.Errorf("error finding port for pod %q, err: %v", pod.Name, err)
+	}
+
+	podMacAddr, err := macAddrFromPort(portName)
+	if err != nil {
+		return fmt.Errorf("error getting mac address for pod %q, err: %v", pod.Name, err)
+	}
+
+	ofport, err := ofPortFromName(portName)
+	if err != nil {
+		return fmt.Errorf("error getting ofport for port %q, err: %v", portName, err)
+	}
+
+	flow := flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
+		WithProtocol("ip").WithIPDest(podIP).WithModDlDest(podMacAddr).
+		WithOutputPort(ofport)
+	c.flows.AddFlow(flow)
+
+	flow = flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
+		WithProtocol("arp").WithArpDest(podIP).WithOutputPort(ofport)
+	c.flows.AddFlow(flow)
+
+	return nil
+}
+
+func findPort(podNamespace, podName string) (string, error) {
+	commands := []string{
+		"--format=json", "--column=name", "find", "port",
+		fmt.Sprintf("external-ids:k8s_pod_namespace=%s", podNamespace),
+		fmt.Sprintf("external-ids:k8s_pod_name=%s", podName),
+	}
+
+	out, err := exec.Command("ovs-vsctl", commands...).Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get OVS port for %s/%s, err: %v",
+			podNamespace, podName, err)
+	}
+
+	dbData := struct {
+		Data [][]string
+	}{}
+	if err = json.Unmarshal(out, &dbData); err != nil {
+		return "", err
+	}
+
+	if len(dbData.Data) == 0 {
+		// TODO: might make more sense to not return an error here since
+		// CNI delete can be called multiple times.
+		return "", fmt.Errorf("OVS port for %s/%s was not found, OVS DB data: %v, output: %q",
+			podNamespace, podName, dbData.Data, string(out))
+	}
+
+	portName := dbData.Data[0][0]
+	return portName, nil
+}
+
+func macAddrFromPort(portName string) (string, error) {
+	commands := []string{
+		"get", "port", portName, "mac",
+	}
+
+	out, err := exec.Command("ovs-vsctl", commands...).Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get MAC address from OVS port for %q, err: %v, out: %q",
+			portName, err, string(out))
+	}
+
+	// TODO: validate mac address
+	macAddr := strings.TrimSpace(string(out))
+	if len(macAddr) > 0 && macAddr[0] == '"' {
+		macAddr = macAddr[1:]
+	}
+	if len(macAddr) > 0 && macAddr[len(macAddr)-1] == '"' {
+		macAddr = macAddr[:len(macAddr)-1]
+	}
+
+	return macAddr, nil
+}
+
+func (c *controller) OnAddVSwitch(obj interface{}) {
+	err := c.syncFlows()
+	if err != nil {
+		klog.Errorf("error syncing flows: %v", err)
+		return
 	}
 }
 
 func (c *controller) OnUpdateVSwitch(oldObj, newObj interface{}) {
-	vswitch, ok := newObj.(*v1alpha1.VSwitchConfig)
-	if !ok {
-		return
-	}
-
-	flows, err := c.flowsForVSwitch(vswitch)
+	err := c.syncFlows()
 	if err != nil {
-		klog.Errorf("error getting flows for vswitch %q, err: %v", vswitch.Name, err)
+		klog.Errorf("error syncing flows: %v", err)
 		return
-	}
-
-	for _, flow := range flows {
-		c.connManager.Send(flow)
 	}
 }
 
 func (c *controller) OnDeleteVSwitch(obj interface{}) {
-	_, ok := obj.(*v1alpha1.VSwitchConfig)
+}
+
+func (c *controller) OnAddPod(obj interface{}) {
+	if err := c.syncFlows(); err != nil {
+		klog.Errorf("error syncing pod: %v", err)
+		return
+	}
+}
+
+func (c *controller) OnUpdatePod(oldObj, newObj interface{}) {
+	if err := c.syncFlows(); err != nil {
+		klog.Errorf("error syncing pod : %v", err)
+		return
+	}
+}
+
+func (c *controller) OnDeletePod(obj interface{}) {
+	_, ok := obj.(*corev1.Pod)
 	if !ok {
 		return
 	}

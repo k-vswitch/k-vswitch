@@ -20,10 +20,17 @@ under the License.
 package openflow
 
 import (
+	"fmt"
 	"net"
+	"os/exec"
+	"strconv"
+	"strings"
 
 	"github.com/Kmotiko/gofc/ofprotocol/ofp13"
 	"github.com/containernetworking/plugins/pkg/ip"
+	kvswitchinformers "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions/kvswitch/v1alpha1"
+	kvswitchlister "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
+	"github.com/k-vswitch/k-vswitch/flows"
 
 	v1informer "k8s.io/client-go/informers/core/v1"
 	v1lister "k8s.io/client-go/listers/core/v1"
@@ -32,6 +39,7 @@ import (
 
 const (
 	hostLocalPort = "host-local"
+	vxlanPort     = "vxlan0"
 )
 
 type connectionManager interface {
@@ -44,33 +52,60 @@ type controller struct {
 	connManager connectionManager
 
 	nodeName    string
+	bridgeName  string
 	gatewayIP   string
 	gatewayMAC  string
 	podCIDR     string
 	clusterCIDR string
 
-	nodeLister v1lister.NodeLister
-	podLister  v1lister.PodLister
+	hostLocalOFPort int
+	vxlanOFPort     int
+
+	flows *flows.FlowsBuffer
+
+	nodeLister    v1lister.NodeLister
+	podLister     v1lister.PodLister
+	vswitchLister kvswitchlister.VSwitchConfigLister
 }
 
 func NewController(connManager connectionManager,
 	nodeInformer v1informer.NodeInformer,
 	podInformer v1informer.PodInformer,
-	gatewayMAC, nodeName, podCIDR, clusterCIDR string) *controller {
-	// TODO: handle err
-	_, podIPNet, _ := net.ParseCIDR(podCIDR)
+	kvswitchInformer kvswitchinformers.VSwitchConfigInformer,
+	bridgeName, gatewayMAC, nodeName,
+	podCIDR, clusterCIDR string) (*controller, error) {
+
+	_, podIPNet, err := net.ParseCIDR(podCIDR)
+	if err != nil {
+		return nil, err
+	}
 	gatewayIP := ip.NextIP(podIPNet.IP.Mask(podIPNet.Mask)).String()
 
-	return &controller{
-		connManager: connManager,
-		nodeName:    nodeName,
-		gatewayIP:   gatewayIP,
-		gatewayMAC:  gatewayMAC,
-		podCIDR:     podCIDR,
-		clusterCIDR: clusterCIDR,
-		nodeLister:  nodeInformer.Lister(),
-		podLister:   podInformer.Lister(),
+	hostLocalOFPort, err := ofPortFromName(hostLocalPort)
+	if err != nil {
+		return nil, err
 	}
+
+	vxlanOFPort, err := ofPortFromName(vxlanPort)
+	if err != nil {
+		return nil, err
+	}
+
+	return &controller{
+		connManager:     connManager,
+		nodeName:        nodeName,
+		bridgeName:      bridgeName,
+		gatewayIP:       gatewayIP,
+		gatewayMAC:      gatewayMAC,
+		podCIDR:         podCIDR,
+		clusterCIDR:     clusterCIDR,
+		hostLocalOFPort: hostLocalOFPort,
+		vxlanOFPort:     vxlanOFPort,
+		flows:           flows.NewFlowsBuffer(),
+		nodeLister:      nodeInformer.Lister(),
+		podLister:       podInformer.Lister(),
+		vswitchLister:   kvswitchInformer.Lister(),
+	}, nil
 }
 
 func (c *controller) Initialize() error {
@@ -112,4 +147,22 @@ func (c *controller) Run() {
 		default:
 		}
 	}
+}
+
+func ofPortFromName(portName string) (int, error) {
+	command := []string{
+		"get", "Interface", portName, "ofport",
+	}
+
+	out, err := exec.Command("ovs-vsctl", command...).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get ofport for port %q, err: %v, out: %q", portName, err, out)
+	}
+
+	ofport, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("error converting ofport output %q to int: %v", string(out), err)
+	}
+
+	return ofport, nil
 }

@@ -23,6 +23,8 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+
+	"k8s.io/klog"
 )
 
 type FlowsBuffer struct {
@@ -38,11 +40,16 @@ func NewFlowsBuffer() *FlowsBuffer {
 }
 
 func (f *FlowsBuffer) AddFlow(flow *Flow) {
-	f.buffer.WriteString(fmt.Sprintf("%s\n", flow))
+	f.buffer.WriteString(fmt.Sprintf("%s", flow))
+	f.buffer.WriteByte('\n')
 }
 
 func (f *FlowsBuffer) String() string {
 	return f.buffer.String()
+}
+
+func (f *FlowsBuffer) Reset() {
+	f.buffer.Reset()
 }
 
 func (f *FlowsBuffer) SyncFlows(bridge string) error {
@@ -52,7 +59,18 @@ func (f *FlowsBuffer) SyncFlows(bridge string) error {
 	}
 
 	cmd := exec.Command("ovs-ofctl", commands...)
-	cmd.Stdin = f.buffer
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("error creating stdin pipe: %v", err)
+	}
+
+	go func() {
+		defer stdin.Close()
+		_, err = stdin.Write(f.buffer.Bytes())
+		if err != nil {
+			klog.Errorf("error writing buffer to pipe: %v", err)
+		}
+	}()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {

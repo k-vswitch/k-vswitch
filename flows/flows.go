@@ -31,11 +31,13 @@ type Flow struct {
 	protocol string
 	ipDest   string
 	arpDest  string
-	tunID    int
+	tunID    int32
 
-	tunDest   string
-	modDlDest string
-	output    int
+	tunDest    string
+	tunIDField int32
+	modDlDest  string
+	output     int
+	resubmit   int
 }
 
 func NewFlow() *Flow {
@@ -70,8 +72,16 @@ func (f *Flow) String() string {
 		actionSet = append(actionSet, fmt.Sprintf("set_field:%s->tun_dst", f.tunDest))
 	}
 
+	if f.tunIDField != 0 {
+		actionSet = append(actionSet, fmt.Sprintf("set_field:%d->tun_id", f.tunIDField))
+	}
+
 	if f.output != 0 {
 		actionSet = append(actionSet, fmt.Sprintf("output:%d", f.output))
+	}
+
+	if f.resubmit != 0 {
+		actionSet = append(actionSet, fmt.Sprintf("resubmit(,%d)", f.resubmit))
 	}
 
 	actions := fmt.Sprintf("actions=%s", strings.Join(actionSet, ","))
@@ -109,7 +119,32 @@ func (f *Flow) WithArpDest(arpDst string) *Flow {
 	return f
 }
 
+func (f *Flow) WithTunnelID(tunID int32) *Flow {
+	f.tunID = tunID
+	return f
+}
+
 func (f *Flow) WithModDlDest(dstMac string) *Flow {
 	f.modDlDest = dstMac
+	return f
+}
+
+func (f *Flow) WithTunnelDest(tunDst string) *Flow {
+	f.tunDest = tunDst
+	return f
+}
+
+func (f *Flow) WithTunnelIDField(tunID int32) *Flow {
+	f.tunIDField = tunID
+	return f
+}
+
+func (f *Flow) WithOutputPort(output int) *Flow {
+	f.output = output
+	return f
+}
+
+func (f *Flow) WithResubmit(table int) *Flow {
+	f.resubmit = table
 	return f
 }

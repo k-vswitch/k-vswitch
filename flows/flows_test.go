@@ -74,6 +74,18 @@ func Test_Flow(t *testing.T) {
 			flowString: "table=0 priority=100 ip nw_dst=10.0.0.1 actions=mod_dl_dst:aa:bb:cc:dd:ee:ff,output:1",
 		},
 		{
+			name: "flow, with ipv4 match, with tunnel field and output port",
+			flow: &Flow{
+				table:      0,
+				priority:   100,
+				protocol:   "ip",
+				ipDest:     "10.0.0.1",
+				tunIDField: 70,
+				output:     1,
+			},
+			flowString: "table=0 priority=100 ip nw_dst=10.0.0.1 actions=set_field:70->tun_id,output:1",
+		},
+		{
 			name: "flow, with ipv4 match, tunnelling and output port",
 			flow: &Flow{
 				table:    0,
@@ -85,6 +97,17 @@ func Test_Flow(t *testing.T) {
 				output:   1,
 			},
 			flowString: "table=0 priority=100 ip nw_dst=10.0.0.1 tun_id=70 actions=set_field:172.20.0.1->tun_dst,output:1",
+		},
+		{
+			name: "flow, with ipv4 match and resubmit",
+			flow: &Flow{
+				table:    0,
+				priority: 100,
+				protocol: "ip",
+				ipDest:   "10.0.0.1",
+				resubmit: 20,
+			},
+			flowString: "table=0 priority=100 ip nw_dst=10.0.0.1 actions=resubmit(,20)",
 		},
 	}
 
