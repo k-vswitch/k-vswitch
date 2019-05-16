@@ -41,9 +41,8 @@ type VSwitchConfigSpec struct {
 	ClusterCIDR string `json:"clusterCIDR"`
 	ServiceCIDR string `json:"serviceCIDR"`
 
-	OverlayIP       string `json:"overlayIP"`
-	OverlayType     string `json:"overlayType"`
-	OverlayTunnelID int32  `json:"overlayTunnelID"`
+	OverlayIP   string `json:"overlayIP"`
+	OverlayType string `json:"overlayType"`
 }
 
 // +genclient:nonNamespaced

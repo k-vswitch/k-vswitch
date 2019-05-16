@@ -64,7 +64,6 @@ func Test_AddFlow(t *testing.T) {
 			priority: 100,
 			protocol: "ip",
 			ipDest:   "10.0.0.1",
-			tunID:    70,
 			tunDest:  "172.20.0.1",
 			output:   1,
 		},
@@ -75,7 +74,7 @@ table=0 priority=10 ip nw_dst=10.0.0.1 actions=resubmit(,10)
 table=10 priority=15 ip nw_dst=10.0.0.1 actions=output:2
 table=20 priority=5 arp arp_tpa=10.0.0.2 actions=output:5
 table=20 priority=100 ip nw_dst=10.0.0.1 actions=mod_dl_dst:aa:bb:cc:dd:ee:ff,output:2
-table=30 priority=100 ip nw_dst=10.0.0.1 tun_id=70 actions=set_field:172.20.0.1->tun_dst,output:1
+table=30 priority=100 ip nw_dst=10.0.0.1 actions=set_field:172.20.0.1->tun_dst,output:1
 `
 
 	flowsBuffer := NewFlowsBuffer()

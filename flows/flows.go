@@ -31,13 +31,11 @@ type Flow struct {
 	protocol string
 	ipDest   string
 	arpDest  string
-	tunID    int32
 
-	tunDest    string
-	tunIDField int32
-	modDlDest  string
-	output     int
-	resubmit   int
+	tunDest   string
+	modDlDest string
+	output    int
+	resubmit  int
 }
 
 func NewFlow() *Flow {
@@ -59,10 +57,6 @@ func (f *Flow) String() string {
 		flow = fmt.Sprintf("%s arp_tpa=%s", flow, f.arpDest)
 	}
 
-	if f.tunID != 0 {
-		flow = fmt.Sprintf("%s tun_id=%d", flow, f.tunID)
-	}
-
 	var actionSet []string
 	if f.modDlDest != "" {
 		actionSet = append(actionSet, fmt.Sprintf("mod_dl_dst:%s", f.modDlDest))
@@ -70,10 +64,6 @@ func (f *Flow) String() string {
 
 	if f.tunDest != "" {
 		actionSet = append(actionSet, fmt.Sprintf("set_field:%s->tun_dst", f.tunDest))
-	}
-
-	if f.tunIDField != 0 {
-		actionSet = append(actionSet, fmt.Sprintf("set_field:%d->tun_id", f.tunIDField))
 	}
 
 	if f.output != 0 {
@@ -119,11 +109,6 @@ func (f *Flow) WithArpDest(arpDst string) *Flow {
 	return f
 }
 
-func (f *Flow) WithTunnelID(tunID int32) *Flow {
-	f.tunID = tunID
-	return f
-}
-
 func (f *Flow) WithModDlDest(dstMac string) *Flow {
 	f.modDlDest = dstMac
 	return f
@@ -131,11 +116,6 @@ func (f *Flow) WithModDlDest(dstMac string) *Flow {
 
 func (f *Flow) WithTunnelDest(tunDst string) *Flow {
 	f.tunDest = tunDst
-	return f
-}
-
-func (f *Flow) WithTunnelIDField(tunID int32) *Flow {
-	f.tunIDField = tunID
 	return f
 }
 

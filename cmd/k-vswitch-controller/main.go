@@ -27,7 +27,6 @@ import (
 
 	kvswitch "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned"
 	kvswitchinformer "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions"
-	"github.com/k-vswitch/k-vswitch/controllers/tunnel"
 	"github.com/k-vswitch/k-vswitch/controllers/vswitchcfg"
 
 	coreinformer "k8s.io/client-go/informers"
@@ -81,9 +80,6 @@ func main() {
 
 	kvswitchInformerFactory.WaitForCacheSync(stopCh)
 	coreInformerFactory.WaitForCacheSync(stopCh)
-
-	tunnelController := tunnel.NewTunnelIDAllocator(kvswitchClientset, vswitchInformer)
-	vswitchInformer.Informer().AddEventHandler(tunnelController)
 
 	vswitchController := vswitchcfg.NewVSwitchConfigController(vswitchInformer,
 		nodeInformer, clientset, kvswitchClientset,
