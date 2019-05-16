@@ -55,21 +55,25 @@ func (c *controller) syncFlows() error {
 
 	vswitchCfgs, err := c.vswitchLister.List(labels.Everything())
 	if err != nil {
-		return err
+		return fmt.Errorf("error listing vswitch configs: %v", err)
 	}
 
 	for _, vswitchCfg := range vswitchCfgs {
 		err = c.flowsForVSwitch(vswitchCfg)
 		if err != nil {
-			return err
+			klog.Warningf("error getting flows for vswitch %q, err: %v", vswitchCfg.Name, err)
 		}
 	}
 
 	pods, err := c.podLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("error listing pods: %v", err)
+	}
+
 	for _, pod := range pods {
 		err = c.flowsForPod(pod)
 		if err != nil {
-			return err
+			klog.Warningf("error getting flows for pod %q, err: %v", pod.Name, err)
 		}
 	}
 
@@ -252,6 +256,7 @@ func (c *controller) OnAddPod(obj interface{}) {
 	needsUpdate, err := c.podNeedsUpdate(pod)
 	if err != nil {
 		klog.Errorf("error checking if pod needs update: %v", err)
+		return
 	}
 
 	if !needsUpdate {
@@ -273,6 +278,7 @@ func (c *controller) OnUpdatePod(oldObj, newObj interface{}) {
 	needsUpdate, err := c.podNeedsUpdate(pod)
 	if err != nil {
 		klog.Errorf("error checking if pod needs update: %v", err)
+		return
 	}
 
 	if !needsUpdate {

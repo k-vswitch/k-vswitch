@@ -31,7 +31,7 @@ import (
 )
 
 type portCache struct {
-	sync.RWMutex
+	sync.Mutex
 
 	store map[string]portInfo
 }
@@ -53,8 +53,8 @@ func portCacheKeyForPod(pod *corev1.Pod) string {
 }
 
 func (p *portCache) GetPortInfo(pod *corev1.Pod) (portInfo, error) {
-	p.RLock()
-	defer p.RUnlock()
+	p.Lock()
+	defer p.Unlock()
 
 	key := portCacheKeyForPod(pod)
 	port, exists := p.store[key]
@@ -83,15 +83,8 @@ func (p *portCache) GetPortInfo(pod *corev1.Pod) (portInfo, error) {
 		ofport: ofport,
 	}
 
-	p.SetPortInfo(key, podPortInfo)
-	return podPortInfo, nil
-}
-
-func (p *portCache) SetPortInfo(key string, podPortInfo portInfo) {
-	p.Lock()
-	defer p.Unlock()
-
 	p.store[key] = podPortInfo
+	return podPortInfo, nil
 }
 
 func (p *portCache) DelPortInfo(pod *corev1.Pod) {
