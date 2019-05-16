@@ -185,13 +185,11 @@ func main() {
 		close(stopCh)
 	}()
 
-	// TODO: adjust resync period when queue is implemented
-	informerFactory := informers.NewSharedInformerFactory(clientset, time.Minute)
+	informerFactory := informers.NewSharedInformerFactory(clientset, 0)
 	nodeInformer := informerFactory.Core().V1().Nodes()
 	podInformer := informerFactory.Core().V1().Pods()
 
-	// TODO: adjust resync period when queue is implemented
-	kvswitchInformerFactory := kvswitchinformer.NewSharedInformerFactory(kvswitchClientset, time.Minute)
+	kvswitchInformerFactory := kvswitchinformer.NewSharedInformerFactory(kvswitchClientset, 0)
 	vswitchInformer := kvswitchInformerFactory.Kvswitch().V1alpha1().VSwitchConfigs()
 
 	connectionManager, err := connection.NewOFConnect()
@@ -231,7 +229,7 @@ func main() {
 
 	go connectionManager.ProcessQueue()
 	go connectionManager.Serve()
-	go c.Run()
+	go c.Run(stopCh)
 
 	// TODO: use context to gracefully handle shutdown
 	<-stopCh

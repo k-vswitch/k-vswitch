@@ -21,6 +21,7 @@ package openflow
 
 import (
 	"net"
+	"time"
 
 	"github.com/Kmotiko/gofc/ofprotocol/ofp13"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -28,6 +29,7 @@ import (
 	kvswitchlister "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
 	"github.com/k-vswitch/k-vswitch/flows"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	v1informer "k8s.io/client-go/informers/core/v1"
 	v1lister "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
@@ -116,7 +118,17 @@ func (c *controller) Initialize() error {
 	return nil
 }
 
-func (c *controller) Run() {
+func (c *controller) Run(stopCh <-chan struct{}) {
+	fullResync := func() {
+		klog.Info("running periodic full resync for flows")
+
+		err := c.syncFlows()
+		if err != nil {
+			klog.Errorf("error syncing flows: %v", err)
+		}
+	}
+	go wait.Until(fullResync, time.Minute, stopCh)
+
 	for {
 		msg := c.connManager.Receive()
 
