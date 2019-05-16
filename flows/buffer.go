@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"k8s.io/klog"
 )
@@ -53,6 +54,8 @@ func (f *FlowsBuffer) Reset() {
 }
 
 func (f *FlowsBuffer) SyncFlows(bridge string) error {
+	startTime := time.Now()
+
 	commands := []string{
 		"-O", "OpenFlow13",
 		"replace-flows", bridge, "-",
@@ -77,5 +80,6 @@ func (f *FlowsBuffer) SyncFlows(bridge string) error {
 		return fmt.Errorf("failed to sync flows: %v, out: %q", err, string(out))
 	}
 
+	klog.Infof("replace-flow took %s to run", time.Since(startTime).String())
 	return nil
 }

@@ -22,6 +22,7 @@ package openflow
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	"github.com/k-vswitch/k-vswitch/flows"
@@ -46,11 +47,14 @@ const (
 )
 
 func (c *controller) syncFlows() error {
+	startTime := time.Now()
+
+	// reset the flows buffer before each sync
 	c.flows.Reset()
 
 	err := c.defaultFlows()
 	if err != nil {
-		return err
+		return fmt.Errorf("error adding default flows: %v", err)
 	}
 
 	vswitchCfgs, err := c.vswitchLister.List(labels.Everything())
@@ -77,7 +81,13 @@ func (c *controller) syncFlows() error {
 		}
 	}
 
-	return c.flows.SyncFlows(c.bridgeName)
+	err = c.flows.SyncFlows(c.bridgeName)
+	if err != nil {
+		return fmt.Errorf("error syncing flows: %v", err)
+	}
+
+	klog.Infof("full sync for flows took %s", time.Since(startTime).String())
+	return nil
 }
 
 func (c *controller) defaultFlows() error {
