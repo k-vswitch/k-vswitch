@@ -42,8 +42,31 @@ const (
 )
 
 func main() {
+	var clusterCIDR string
+	var serviceCIDR string
+	var overlayType string
+
+	flag.StringVar(&clusterCIDR, "cluster-cidr", "", "The cluster CIDR block for pod IPs.")
+	flag.StringVar(&serviceCIDR, "service-cidr", "", "The service CIDR block for cluster IPs.")
+	flag.StringVar(&overlayType, "overlay-type", defaultOverlayType, "The overlay type to use, only vxlan is supported for now")
+
 	klog.InitFlags(flag.CommandLine)
 	klog.Info("starting k-vswitch-controller")
+
+	if clusterCIDR == "" {
+		klog.Errorf("--cluster-cidr is required and should match what is configured on the cluster")
+		os.Exit(1)
+	}
+
+	if serviceCIDR == "" {
+		klog.Errorf("--service-cidr is required and should match what is configured on the cluster")
+		os.Exit(1)
+	}
+
+	if overlayType != "vxlan" {
+		klog.Errorf("invalid overlay type: %q", overlayType)
+		os.Exit(1)
+	}
 
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
