@@ -1,5 +1,5 @@
 IMAGE_REPO=kvswitch/k-vswitch
-IMAGE_TAG=latest
+IMAGE_TAG=dev
 
 all: compile build push
 
