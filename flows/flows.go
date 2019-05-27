@@ -30,7 +30,9 @@ type Flow struct {
 
 	protocol string
 	ipDest   string
+	ipSrc    string
 	arpDest  string
+	arpSrc   string
 
 	tunDest   string
 	modDlDest string
@@ -53,8 +55,16 @@ func (f *Flow) String() string {
 		flow = fmt.Sprintf("%s nw_dst=%s", flow, f.ipDest)
 	}
 
+	if f.ipSrc != "" {
+		flow = fmt.Sprintf("%s nw_src=%s", flow, f.ipSrc)
+	}
+
 	if f.arpDest != "" {
 		flow = fmt.Sprintf("%s arp_tpa=%s", flow, f.arpDest)
+	}
+
+	if f.arpSrc != "" {
+		flow = fmt.Sprintf("%s arp_spa=%s", flow, f.arpSrc)
 	}
 
 	var actionSet []string
@@ -104,8 +114,18 @@ func (f *Flow) WithIPDest(ipDst string) *Flow {
 	return f
 }
 
+func (f *Flow) WithIPSrc(ipSrc string) *Flow {
+	f.ipSrc = ipSrc
+	return f
+}
+
 func (f *Flow) WithArpDest(arpDst string) *Flow {
 	f.arpDest = arpDst
+	return f
+}
+
+func (f *Flow) WithArpSrc(arpSrc string) *Flow {
+	f.arpSrc = arpSrc
 	return f
 }
 
