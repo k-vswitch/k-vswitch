@@ -53,6 +53,7 @@ const (
 	cniConfigPath           = "/etc/cni/net.d/10-k-vswitch.json"
 	bridgeName              = "k-vswitch0"
 	hostLocalPort           = "host-local"
+	clusterWidePort         = "cluster-wide"
 	vxlanPort               = "vxlan0"
 	defaultControllerTarget = "tcp:127.0.0.1:6653"
 )
@@ -126,6 +127,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = setupClusterWideInternalPort()
+	if err != nil {
+		klog.Errorf("failed to setup cluster-wide port: %v", err)
+		os.Exit(1)
+	}
+
 	err = setupVxLANPort()
 	if err != nil {
 		klog.Errorf("failed to setup vxlan port: %v", err)
@@ -138,15 +145,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	addr, err := netlinkAddrForCIDR(clusterCIDR, podCIDR)
+	clusterWideLink, err := netlink.LinkByName(clusterWidePort)
 	if err != nil {
-		klog.Errorf("failed to get netlink addr for CIDR %q, err: %v", podCIDR, err)
+		klog.Errorf("failed to get bridge %q, err: %v", bridgeName, err)
+		os.Exit(1)
+	}
+
+	addr, err := netlinkAddrForLocal(podCIDR)
+	if err != nil {
+		klog.Errorf("failed to get netlink addr for pod CIDR %q, err: %v", podCIDR, err)
 		os.Exit(1)
 	}
 
 	if err := netlink.AddrReplace(hostLocalLink, addr); err != nil {
-		klog.Errorf("could not add addr %q to bridge %q, err: %v",
-			podCIDR, bridgeName, err)
+		klog.Errorf("could not add local pod cidr %q to port %q, err: %v",
+			podCIDR, hostLocalLink, err)
+		os.Exit(1)
+	}
+
+	route, err := netlinkRouteForCluster(clusterCIDR, clusterWideLink)
+	if err != nil {
+		klog.Errorf("failed to get netlink route for cluster CIDR %q, err: %v", clusterCIDR, err)
+		os.Exit(1)
+	}
+
+	if err := netlink.RouteReplace(route); err != nil {
+		klog.Errorf("could not add route for cluster cidr %q to port %q, err: %v",
+			clusterCIDR, clusterWidePort, err)
 		os.Exit(1)
 	}
 
@@ -172,7 +197,13 @@ func main() {
 
 	hostLocalInterface, err := net.InterfaceByName(hostLocalPort)
 	if err != nil {
-		klog.Errorf("error getting %q: err: %v", bridgeName, err)
+		klog.Errorf("error getting interface %q: err: %v", hostLocalPort, err)
+		os.Exit(1)
+	}
+
+	clusterWideInterface, err := net.InterfaceByName(clusterWidePort)
+	if err != nil {
+		klog.Errorf("error getting interface %q: err: %v", clusterWidePort, err)
 		os.Exit(1)
 	}
 
@@ -198,7 +229,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := openflow.NewController(connectionManager, nodeInformer, podInformer, vswitchInformer, bridgeName, hostLocalInterface.HardwareAddr.String(), curNode.Name, podCIDR, clusterCIDR)
+	c, err := openflow.NewController(connectionManager, nodeInformer,
+		podInformer, vswitchInformer, bridgeName,
+		hostLocalInterface.HardwareAddr.String(),
+		clusterWideInterface.HardwareAddr.String(),
+		curNode.Name, podCIDR, clusterCIDR)
 	if err != nil {
 		klog.Errorf("error initializing open flow controller: %v", err)
 		os.Exit(1)
@@ -254,7 +289,20 @@ func waitForVSwitchConfig(kvswitchClient kvswitch.Interface, nodeName string) (*
 	return nil, fmt.Errorf("vswitch config with name %q not found", nodeName)
 }
 
-func netlinkAddrForCIDR(clusterCIDR, podCIDR string) (*netlink.Addr, error) {
+func netlinkRouteForCluster(clusterCIDR string, link netlink.Link) (*netlink.Route, error) {
+	_, clusterIPNet, err := net.ParseCIDR(clusterCIDR)
+	if err != nil {
+		return nil, err
+	}
+
+	return &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Scope:     netlink.SCOPE_LINK,
+		Dst:       clusterIPNet,
+	}, nil
+}
+
+func netlinkAddrForLocal(podCIDR string) (*netlink.Addr, error) {
 	_, podIPNet, err := net.ParseCIDR(podCIDR)
 	if err != nil {
 		return nil, err
@@ -262,18 +310,14 @@ func netlinkAddrForCIDR(clusterCIDR, podCIDR string) (*netlink.Addr, error) {
 
 	gw := ip.NextIP(podIPNet.IP.Mask(podIPNet.Mask))
 
-	_, clusterIPNet, err := net.ParseCIDR(clusterCIDR)
-	if err != nil {
-		return nil, err
-	}
-
 	return &netlink.Addr{
 		IPNet: &net.IPNet{
 			IP:   gw,
-			Mask: clusterIPNet.Mask,
+			Mask: podIPNet.Mask,
 		},
 		Label: "",
 	}, nil
+
 }
 
 // installCNIConf adds the CNI config file given the pod cidr of the node
@@ -334,6 +378,29 @@ func setupHostLocalInternalPort() error {
 
 	if err := netlink.LinkSetUp(hostLocal); err != nil {
 		return fmt.Errorf("failed to bring bridge %q up: %v", hostLocalPort, err)
+	}
+
+	return nil
+}
+
+func setupClusterWideInternalPort() error {
+	command := []string{
+		"--may-exist", "add-port", bridgeName, clusterWidePort,
+		"--", "set", "Interface", clusterWidePort, "type=internal",
+	}
+
+	out, err := exec.Command("ovs-vsctl", command...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to setup cluster-wide port, err: %v, output: %q", err, out)
+	}
+
+	clusterWide, err := netlink.LinkByName(clusterWidePort)
+	if err != nil {
+		return fmt.Errorf("could not lookup %q: %v", clusterWidePort, err)
+	}
+
+	if err := netlink.LinkSetUp(clusterWide); err != nil {
+		return fmt.Errorf("failed to bring bridge %q up: %v", clusterWidePort, err)
 	}
 
 	return nil

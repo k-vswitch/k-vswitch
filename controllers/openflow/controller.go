@@ -37,8 +37,9 @@ import (
 )
 
 const (
-	hostLocalPort = "host-local"
-	vxlanPort     = "vxlan0"
+	hostLocalPort   = "host-local"
+	clusterWidePort = "cluster-wide"
+	vxlanPort       = "vxlan0"
 )
 
 type connectionManager interface {
@@ -50,15 +51,17 @@ type controller struct {
 	datapathID  uint64
 	connManager connectionManager
 
-	nodeName    string
-	bridgeName  string
-	gatewayIP   string
-	gatewayMAC  string
-	podCIDR     string
-	clusterCIDR string
+	nodeName       string
+	bridgeName     string
+	gatewayIP      string
+	hostLocalMAC   string
+	clusterWideMAC string
+	podCIDR        string
+	clusterCIDR    string
 
-	hostLocalOFPort int
-	vxlanOFPort     int
+	hostLocalOFPort   int
+	clusterWideOFPort int
+	vxlanOFPort       int
 
 	flows     *flows.FlowsBuffer
 	flowsLock sync.Mutex
@@ -74,7 +77,7 @@ func NewController(connManager connectionManager,
 	nodeInformer v1informer.NodeInformer,
 	podInformer v1informer.PodInformer,
 	kvswitchInformer kvswitchinformers.VSwitchConfigInformer,
-	bridgeName, gatewayMAC, nodeName,
+	bridgeName, hostLocalMAC, clusterWideMAC, nodeName,
 	podCIDR, clusterCIDR string) (*controller, error) {
 
 	_, podIPNet, err := net.ParseCIDR(podCIDR)
@@ -88,26 +91,33 @@ func NewController(connManager connectionManager,
 		return nil, err
 	}
 
+	clusterWideOFPort, err := ofPortFromName(clusterWidePort)
+	if err != nil {
+		return nil, err
+	}
+
 	vxlanOFPort, err := ofPortFromName(vxlanPort)
 	if err != nil {
 		return nil, err
 	}
 
 	return &controller{
-		connManager:     connManager,
-		nodeName:        nodeName,
-		bridgeName:      bridgeName,
-		gatewayIP:       gatewayIP,
-		gatewayMAC:      gatewayMAC,
-		podCIDR:         podCIDR,
-		clusterCIDR:     clusterCIDR,
-		hostLocalOFPort: hostLocalOFPort,
-		vxlanOFPort:     vxlanOFPort,
-		flows:           flows.NewFlowsBuffer(),
-		portCache:       NewPortCache(),
-		nodeLister:      nodeInformer.Lister(),
-		podLister:       podInformer.Lister(),
-		vswitchLister:   kvswitchInformer.Lister(),
+		connManager:       connManager,
+		nodeName:          nodeName,
+		bridgeName:        bridgeName,
+		gatewayIP:         gatewayIP,
+		hostLocalMAC:      hostLocalMAC,
+		clusterWideMAC:    clusterWideMAC,
+		podCIDR:           podCIDR,
+		clusterCIDR:       clusterCIDR,
+		hostLocalOFPort:   hostLocalOFPort,
+		clusterWideOFPort: clusterWideOFPort,
+		vxlanOFPort:       vxlanOFPort,
+		flows:             flows.NewFlowsBuffer(),
+		portCache:         NewPortCache(),
+		nodeLister:        nodeInformer.Lister(),
+		podLister:         podInformer.Lister(),
+		vswitchLister:     kvswitchInformer.Lister(),
 	}, nil
 }
 

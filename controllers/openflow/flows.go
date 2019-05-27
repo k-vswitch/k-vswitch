@@ -104,7 +104,7 @@ func (c *controller) defaultFlows() error {
 	// with a dl destination rewrite to account for traffic from the overlay
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("ip").
-		WithIPDest(c.gatewayIP).WithModDlDest(c.gatewayMAC).
+		WithIPDest(c.gatewayIP).WithModDlDest(c.hostLocalMAC).
 		WithOutputPort(c.hostLocalOFPort)
 	c.flows.AddFlow(flow)
 
@@ -177,6 +177,60 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 		flow = flows.NewFlow().WithTable(tableL2Forwarding).
 			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
 			WithResubmit(tableL2Rewrites)
+		c.flows.AddFlow(flow)
+	}
+
+	// directly output to host-local port if dest address is the current node,
+	// otherwise route back to vxlan
+	nodeIP := vswitch.Spec.OverlayIP
+	if isCurrentNode {
+		// traffic towards the local node IP from local pod CIDR
+		// should go through host local port
+		flow := flows.NewFlow().WithTable(tableClassification).
+			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
+			WithArpSrc(podCIDR).WithOutputPort(c.hostLocalOFPort)
+		c.flows.AddFlow(flow)
+
+		flow = flows.NewFlow().WithTable(tableClassification).
+			WithPriority(100).WithProtocol("ip").
+			WithIPDest(nodeIP).WithIPSrc(podCIDR).
+			WithModDlDest(c.hostLocalMAC).WithOutputPort(c.hostLocalOFPort)
+		c.flows.AddFlow(flow)
+
+		// traffic towards the local node IP from the rest of the cluster
+		// should go through cluster wide port
+		flow = flows.NewFlow().WithTable(tableClassification).
+			WithPriority(50).WithProtocol("arp").WithArpDest(nodeIP).
+			WithOutputPort(c.clusterWideOFPort)
+		c.flows.AddFlow(flow)
+
+		flow = flows.NewFlow().WithTable(tableClassification).
+			WithPriority(50).WithProtocol("ip").WithIPDest(nodeIP).
+			WithModDlDest(c.clusterWideMAC).WithOutputPort(c.clusterWideOFPort)
+		c.flows.AddFlow(flow)
+	} else {
+		// for IP traffic to remote node IP, send to table L3 forwarding
+		flow := flows.NewFlow().WithTable(tableClassification).
+			WithPriority(50).WithProtocol("ip").WithIPDest(nodeIP).
+			WithResubmit(tableL3Forwarding)
+		c.flows.AddFlow(flow)
+
+		// for ARP traffic to remote node IP, send to L2 forwarding
+		flow = flows.NewFlow().WithTable(tableClassification).
+			WithPriority(50).WithProtocol("arp").WithArpDest(nodeIP).
+			WithResubmit(tableL2Forwarding)
+		c.flows.AddFlow(flow)
+
+		// send IP traffic to remote node IP through tunnel
+		flow = flows.NewFlow().WithTable(tableL3Forwarding).
+			WithPriority(100).WithProtocol("ip").WithIPDest(nodeIP).
+			WithTunnelDest(nodeIP).WithOutputPort(c.vxlanOFPort)
+		c.flows.AddFlow(flow)
+
+		// send ARP traffic to node IP through tunnel
+		flow = flows.NewFlow().WithTable(tableL2Forwarding).
+			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
+			WithTunnelDest(nodeIP).WithOutputPort(c.vxlanOFPort)
 		c.flows.AddFlow(flow)
 	}
 
