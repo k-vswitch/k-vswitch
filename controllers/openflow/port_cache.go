@@ -139,12 +139,9 @@ func macAddrFromPort(portName string) (string, error) {
 
 	// TODO: validate mac address
 	macAddr := strings.TrimSpace(string(out))
-	if len(macAddr) > 0 && macAddr[0] == '"' {
-		macAddr = macAddr[1:]
-	}
-	if len(macAddr) > 0 && macAddr[len(macAddr)-1] == '"' {
-		macAddr = macAddr[:len(macAddr)-1]
-	}
+	// OVSDB returns mac addr with quotes, need to trim them
+	macAddr = strings.TrimPrefix(macAddr, "\"")
+	macAddr = strings.TrimSuffix(macAddr, "\"")
 
 	return macAddr, nil
 }
