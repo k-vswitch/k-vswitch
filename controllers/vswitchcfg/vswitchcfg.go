@@ -22,7 +22,6 @@ package vswitchcfg
 import (
 	"errors"
 	"fmt"
-
 	kvswitch "github.com/k-vswitch/k-vswitch/apis/generated/clientset/versioned"
 	kvswitchinformers "github.com/k-vswitch/k-vswitch/apis/generated/informers/externalversions/kvswitch/v1alpha1"
 	kvswitchlister "github.com/k-vswitch/k-vswitch/apis/generated/listers/kvswitch/v1alpha1"
@@ -149,27 +148,14 @@ func (v *vswitchConfig) needsUpdate(node *corev1.Node) (bool, error) {
 		return false, fmt.Errorf("failed to get pod CIDR for node: %v", err)
 	}
 
-	if vswitchCfg.Spec.OverlayIP != overlayIP {
-		return true, nil
-	}
+	var (
+		overlayIPChanged   = vswitchCfg.Spec.OverlayIP != overlayIP
+		overlayTypeChanged = vswitchCfg.Spec.OverlayType != v.overlayType
+		podCIDRChanged     = vswitchCfg.Spec.PodCIDR != nodePodCIDR
+		clusterCIDRChanged = vswitchCfg.Spec.ClusterCIDR != v.clusterCIDR
+	)
 
-	if vswitchCfg.Spec.OverlayType != v.overlayType {
-		return true, nil
-	}
-
-	if vswitchCfg.Spec.PodCIDR != nodePodCIDR {
-		return true, nil
-	}
-
-	if vswitchCfg.Spec.ClusterCIDR != v.clusterCIDR {
-		return true, nil
-	}
-
-	if vswitchCfg.Spec.ServiceCIDR != v.serviceCIDR {
-		return true, nil
-	}
-
-	return false, nil
+	return overlayIPChanged || overlayTypeChanged || podCIDRChanged || clusterCIDRChanged, nil
 }
 
 func (v *vswitchConfig) syncVSwitchConfig(node *corev1.Node) error {
@@ -248,10 +234,8 @@ func nodeOverlayIP(node *corev1.Node) (string, error) {
 }
 
 func nodePodCIDR(node *corev1.Node) (string, error) {
-	podCIDR := node.Spec.PodCIDR
-	if podCIDR == "" {
-		return "", fmt.Errorf("node %q did not have pod CIDR set", node.Name)
+	if podCIDR := node.Spec.PodCIDR; podCIDR != "" {
+		return podCIDR, nil
 	}
-
-	return podCIDR, nil
+	return "", fmt.Errorf("node %q did not have pod CIDR set", node.Name)
 }

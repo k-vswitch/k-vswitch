@@ -10,18 +10,21 @@ compile:
 	  -w /go/src/github.com/k-vswitch/k-vswitch \
 	  golang:1.12 sh -c '\
 	  CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -mod=vendor \
+	  -o bin/k-vswitchd \
 	  github.com/k-vswitch/k-vswitch/cmd/k-vswitchd'
 	docker run \
 	  -v $(PWD):/go/src/github.com/k-vswitch/k-vswitch \
 	  -w /go/src/github.com/k-vswitch/k-vswitch \
 	  golang:1.12 sh -c '\
 	  CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -mod=vendor \
+	  -o bin/k-vswitch-controller \
 	  github.com/k-vswitch/k-vswitch/cmd/k-vswitch-controller'
 	docker run \
 	  -v $(PWD):/go/src/github.com/k-vswitch/k-vswitch \
 	  -w /go/src/github.com/k-vswitch/k-vswitch \
 	  golang:1.12 sh -c '\
 	  CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -mod=vendor \
+	  -o bin/k-vswitch-cni \
 	  github.com/k-vswitch/k-vswitch/cmd/k-vswitch-cni'
 
 .PHONY: build
