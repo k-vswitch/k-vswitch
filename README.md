@@ -10,10 +10,10 @@ k-vswitch is an easy-to-operate and high performance Kubernetes networking plugi
 
 k-vswitch has 3 core components:
 
-* k-vswitch-cni: a CNI implementation based on OVS - adds pod network namespaces as OVS ports.
+* **k-vswitch-cni**: a CNI implementation based on OVS - adds pod network namespaces as OVS ports.
                      k-vswitch-cni is automatically installed into nodes by k-vswitchd.
-* k-vswitchd: a DaemonSet that runs on your cluster, responsible for setting up the OVS bridge and any necessary flows.
-* k-vswitch-controller: a StatefulSet responsible for managing CRDs that are consumed by k-vswitchd.
+* **k-vswitchd**: a DaemonSet that runs on your cluster, responsible for setting up the OVS bridge and any necessary flows.
+* **k-vswitch-controller**: a StatefulSet responsible for managing CRDs that are consumed by k-vswitchd.
 
 ### Requirements
 
@@ -37,9 +37,9 @@ $ dnf install openvswitch
 
 k-vswitch requires the following information before it can be installed:
 
-* cluster CIDR: this is the same cluster CIDR you configured on various components of your cluster via `--cluster-cidr`.
-* service CIDR: this is the same service CIDR you configured on the `kube-apiserver` via `--service-cluster-ip-range`.
-* overlay type: this is the overlay type to use, currently 'vxlan' and 'gre' are supported. 'gre' is recommended but some
+* **cluster CIDR**: this is the same cluster CIDR you configured on various components of your cluster via `--cluster-cidr`.
+* **service CIDR**: this is the same service CIDR you configured on the `kube-apiserver` via `--service-cluster-ip-range`.
+* **overlay type**: this is the overlay type to use, currently 'vxlan' and 'gre' are supported. 'gre' is recommended but some
            cloud providers may not support it in which case you can use `vxlan`.
 
 Once you have the following, you can install the latest deployment spec, update the k-vswitch configmap based on the above
@@ -55,5 +55,5 @@ $ kubectl apply -f k-vswitch-latest.yaml
 
 k-vswitch is in active development with the following features planned for the near-future:
 
-* Network Policies support - allow/drop packets based on the Kubernetes NetworkPolicy API
-* Windows support - k-vswitch is currently only supported on Linux. Since OVS supports Windows, k-vswitch will support it in the future.
+* **Network Policies support** - allow/drop packets based on the Kubernetes NetworkPolicy API
+* **Windows support** - k-vswitch is currently only supported on Linux. Since OVS supports Windows, k-vswitch will support it in the future.
