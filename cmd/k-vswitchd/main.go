@@ -54,7 +54,7 @@ const (
 	bridgeName              = "k-vswitch0"
 	hostLocalPort           = "host-local"
 	clusterWidePort         = "cluster-wide"
-	vxlanPort               = "vxlan0"
+	overlayPort             = "overlay0"
 	defaultControllerTarget = "tcp:127.0.0.1:6653"
 )
 
@@ -133,9 +133,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = setupVxLANPort()
+	err = setupOverlayPort(vswitchConfig.Spec.OverlayType)
 	if err != nil {
-		klog.Errorf("failed to setup vxlan port: %v", err)
+		klog.Errorf("failed to setup overlay port: %v", err)
 		os.Exit(1)
 	}
 
@@ -406,16 +406,16 @@ func setupClusterWideInternalPort() error {
 	return nil
 }
 
-func setupVxLANPort() error {
+func setupOverlayPort(overlayType string) error {
 	command := []string{
-		"--may-exist", "add-port", bridgeName, vxlanPort,
-		"--", "set", "Interface", vxlanPort, "type=vxlan",
+		"--may-exist", "add-port", bridgeName, overlayPort,
+		"--", "set", "Interface", overlayPort, fmt.Sprintf("type=%s", overlayType),
 		"option:remote_ip=flow", "option:key=flow",
 	}
 
 	out, err := exec.Command("ovs-vsctl", command...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to setup vxlan port %q, err: %v, out: %q", vxlanPort, err, string(out))
+		return fmt.Errorf("failed to setup overlay port %q, err: %v, out: %q", overlayPort, err, string(out))
 	}
 
 	return nil

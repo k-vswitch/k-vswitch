@@ -39,7 +39,7 @@ import (
 const (
 	hostLocalPort   = "host-local"
 	clusterWidePort = "cluster-wide"
-	vxlanPort       = "vxlan0"
+	overlayPort     = "overlay0"
 )
 
 type connectionManager interface {
@@ -61,7 +61,7 @@ type controller struct {
 
 	hostLocalOFPort   int
 	clusterWideOFPort int
-	vxlanOFPort       int
+	overlayOFPort     int
 
 	flows     *flows.FlowsBuffer
 	flowsLock sync.Mutex
@@ -96,7 +96,7 @@ func NewController(connManager connectionManager,
 		return nil, err
 	}
 
-	vxlanOFPort, err := ofPortFromName(vxlanPort)
+	overlayOFPort, err := ofPortFromName(overlayPort)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func NewController(connManager connectionManager,
 		clusterCIDR:       clusterCIDR,
 		hostLocalOFPort:   hostLocalOFPort,
 		clusterWideOFPort: clusterWideOFPort,
-		vxlanOFPort:       vxlanOFPort,
+		overlayOFPort:     overlayOFPort,
 		flows:             flows.NewFlowsBuffer(),
 		portCache:         NewPortCache(),
 		nodeLister:        nodeInformer.Lister(),

@@ -153,19 +153,19 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 	// flow for table 30 - L3 Forwarding
 	//
 
-	// If pod cidr is not for current node, output to vxlan overlay port
+	// If pod cidr is not for current node, output to overlay port
 	// If pod cidr is for current node, go straight to L2 rewrites
 	if !isCurrentNode {
 		flow := flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(150).WithProtocol("ip").
 			WithIPDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
-			WithOutputPort(c.vxlanOFPort)
+			WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 
 		flow = flows.NewFlow().WithTable(tableL2Forwarding).
 			WithPriority(150).WithProtocol("arp").
 			WithArpDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
-			WithOutputPort(c.vxlanOFPort)
+			WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 
 	} else {
@@ -181,7 +181,7 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 	}
 
 	// directly output to host-local port if dest address is the current node,
-	// otherwise route back to vxlan
+	// otherwise route back to overlay
 	nodeIP := vswitch.Spec.OverlayIP
 	if isCurrentNode {
 		// traffic towards the local node IP from local pod CIDR
@@ -224,13 +224,13 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 		// send IP traffic to remote node IP through tunnel
 		flow = flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(nodeIP).
-			WithTunnelDest(nodeIP).WithOutputPort(c.vxlanOFPort)
+			WithTunnelDest(nodeIP).WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 
 		// send ARP traffic to node IP through tunnel
 		flow = flows.NewFlow().WithTable(tableL2Forwarding).
 			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
-			WithTunnelDest(nodeIP).WithOutputPort(c.vxlanOFPort)
+			WithTunnelDest(nodeIP).WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 	}
 
