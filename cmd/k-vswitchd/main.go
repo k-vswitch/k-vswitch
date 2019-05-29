@@ -250,8 +250,7 @@ func main() {
 		DeleteFunc: c.OnDeletePod,
 	})
 
-	err = c.Initialize()
-	if err != nil {
+	if err = c.Initialize(); err != nil {
 		klog.Errorf("error initializing openflow controller: %v", err)
 		os.Exit(1)
 	}
