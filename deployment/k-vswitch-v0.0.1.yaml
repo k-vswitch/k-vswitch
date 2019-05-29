@@ -1,0 +1,225 @@
+# Configmap 'k-vswitch' is the only resource in this file that requires
+# updates based on your cluster configuration.
+#
+# clusterCIDR should be updated to the same CIDR configured on your
+#    Kubernetes components
+# serviceCIDR should be updated to the same CIDR configured on your
+#    Kubernetes components
+# overlayType should be updated based on the overlay type you want.
+#    Currently 'vxlan' and 'gre' are supported. 'gre' is recommended
+#    but some cloud providers may not allow gre traffic over your network.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k-vswitch
+  namespace: kube-system
+data:
+  clusterCIDR: "100.96.0.0/11" # change this depending on your cluster
+  serviceCIDR: "100.64.0.0/13" # change this depending on your cluster
+  overlayType: "vxlan"         # change this depending on your cluster
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: vswitchconfigs.kvswitch.io
+spec:
+  group: kvswitch.io
+  version: v1alpha1
+  names:
+    kind: VSwitchConfig
+    plural: vswitchconfigs
+  scope: Cluster
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k-vswitch
+  namespace: kube-system
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: k-vswitch
+rules:
+  - apiGroups:
+    - ""
+    resources:
+      - services
+      - nodes
+      - endpoints
+      - pods
+      - namespaces
+    verbs:
+      - list
+      - get
+      - watch
+  - apiGroups:
+    - "networking.k8s.io"
+    resources:
+      - "networkpolicies"
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+    - "kvswitch.io"
+    resources:
+      - vswitchconfigs
+    verbs:
+      - list
+      - get
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: k-vswitch
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k-vswitch
+subjects:
+- kind: ServiceAccount
+  name: k-vswitch
+  namespace: kube-system
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: k-vswitch-controller
+  namespace: kube-system
+spec:
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  serviceName: k-vswitch-controller
+  selector:
+    matchLabels:
+      k8s-app: k-vswitch-controller
+  template:
+    metadata:
+      labels:
+        k8s-app: k-vswitch-controller
+    spec:
+      tolerations:
+      - key: "node-role.kubernetes.io/master"
+        effect: NoSchedule
+      hostNetwork: true
+      serviceAccountName: k-vswitch
+      containers:
+      - name: k-vswitch-controller
+        image: kvswitch/k-vswitch:v0.0.1
+        command:
+         - "/bin/k-vswitch-controller"
+         - "--cluster-cidr=$(K_VSWITCH_CLUSTER_CIDR)"
+         - "--service-cidr=$(K_VSWITCH_SERVICE_CIDR)"
+         - "--overlay-type=$(K_VSWITCH_OVERLAY_TYPE)"
+        env:
+          - name: K_VSWITCH_CLUSTER_CIDR
+            valueFrom:
+              configMapKeyRef:
+                name: k-vswitch
+                key: clusterCIDR
+          - name: K_VSWITCH_SERVICE_CIDR
+            valueFrom:
+              configMapKeyRef:
+                name: k-vswitch
+                key: serviceCIDR
+          - name: K_VSWITCH_OVERLAY_TYPE
+            valueFrom:
+              configMapKeyRef:
+                name: k-vswitch
+                key: overlayType
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k-vswitchd
+  namespace: kube-system
+  labels:
+    k8s-app: k-vswitchd
+spec:
+  selector:
+    matchLabels:
+      k8s-app: k-vswitchd
+  template:
+    metadata:
+      labels:
+        k8s-app: k-vswitchd
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      serviceAccountName: k-vswitch
+      containers:
+      - name: k-vswitchd
+        image: kvswitch/k-vswitch:v0.0.1
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+        volumeMounts:
+          - mountPath: /etc/cni/net.d
+            name: cni-conf
+          - mountPath: /etc/openvswitch
+            name: ovs-etc
+          - mountPath: /var/run/openvswitch
+            name: ovs-run
+          - mountPath: /var/log/openvswitch
+            name: ovs-log
+          - mountPath: /lib/modules
+            name: lib-modules
+      initContainers:
+      - name: install-cni
+        image: kvswitch/k-vswitch:v0.0.1
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e -x;
+          cp /bin/k-vswitch-cni /opt/cni/bin/
+        volumeMounts:
+        - mountPath: /opt/cni/bin
+          name: cni-bin-dir
+      hostNetwork: true
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+      volumes:
+      - name: cni-bin-dir
+        hostPath:
+          path: /opt/cni/bin
+      - name: cni-conf
+        hostPath:
+          path: /etc/cni/net.d
+      - name: ovs-run
+        hostPath:
+          path: /var/run/openvswitch
+      - name: ovs-etc
+        hostPath:
+          path: /etc/openvswitch
+      - name: ovs-log
+        hostPath:
+          path: /var/log/openvswitch
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
