@@ -5,6 +5,7 @@ all: compile build push
 
 .PHONY: compile
 compile:
+	mkdir -p bin/
 	docker run \
 	  -v $(PWD):/go/src/github.com/k-vswitch/k-vswitch \
 	  -w /go/src/github.com/k-vswitch/k-vswitch \
