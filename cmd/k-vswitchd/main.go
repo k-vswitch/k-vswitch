@@ -217,7 +217,6 @@ func main() {
 	}()
 
 	informerFactory := informers.NewSharedInformerFactory(clientset, 0)
-	nodeInformer := informerFactory.Core().V1().Nodes()
 	podInformer := informerFactory.Core().V1().Pods()
 	nsInformer := informerFactory.Core().V1().Namespaces()
 	netPolInformer := informerFactory.Networking().V1().NetworkPolicies()
@@ -231,8 +230,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := openflow.NewController(connectionManager, nodeInformer,
-		podInformer, nsInformer, netPolInformer, vswitchInformer, bridgeName,
+	c, err := openflow.NewController(connectionManager, podInformer,
+		nsInformer, netPolInformer, vswitchInformer, bridgeName,
 		nodeLocalInterface.HardwareAddr.String(),
 		clusterWideInterface.HardwareAddr.String(),
 		curNode.Name, podCIDR, clusterCIDR)
