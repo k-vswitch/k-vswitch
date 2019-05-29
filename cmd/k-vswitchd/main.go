@@ -52,7 +52,7 @@ import (
 const (
 	cniConfigPath           = "/etc/cni/net.d/10-k-vswitch.json"
 	bridgeName              = "k-vswitch0"
-	hostLocalPort           = "host-local"
+	nodeLocalPort           = "node-local"
 	clusterWidePort         = "cluster-wide"
 	overlayPort             = "overlay0"
 	defaultControllerTarget = "tcp:127.0.0.1:6653"
@@ -121,9 +121,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = setupHostLocalInternalPort()
+	err = setupNodeLocalInternalPort()
 	if err != nil {
-		klog.Errorf("failed to setup host-local port: %v", err)
+		klog.Errorf("failed to setup node-local port: %v", err)
 		os.Exit(1)
 	}
 
@@ -139,7 +139,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	hostLocalLink, err := netlink.LinkByName(hostLocalPort)
+	nodeLocalLink, err := netlink.LinkByName(nodeLocalPort)
 	if err != nil {
 		klog.Errorf("failed to get bridge %q, err: %v", bridgeName, err)
 		os.Exit(1)
@@ -157,9 +157,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := netlink.AddrReplace(hostLocalLink, addr); err != nil {
+	if err := netlink.AddrReplace(nodeLocalLink, addr); err != nil {
 		klog.Errorf("could not add local pod cidr %q to port %q, err: %v",
-			podCIDR, hostLocalLink, err)
+			podCIDR, nodeLocalLink, err)
 		os.Exit(1)
 	}
 
@@ -195,9 +195,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	hostLocalInterface, err := net.InterfaceByName(hostLocalPort)
+	nodeLocalInterface, err := net.InterfaceByName(nodeLocalPort)
 	if err != nil {
-		klog.Errorf("error getting interface %q: err: %v", hostLocalPort, err)
+		klog.Errorf("error getting interface %q: err: %v", nodeLocalPort, err)
 		os.Exit(1)
 	}
 
@@ -231,7 +231,7 @@ func main() {
 
 	c, err := openflow.NewController(connectionManager, nodeInformer,
 		podInformer, vswitchInformer, bridgeName,
-		hostLocalInterface.HardwareAddr.String(),
+		nodeLocalInterface.HardwareAddr.String(),
 		clusterWideInterface.HardwareAddr.String(),
 		curNode.Name, podCIDR, clusterCIDR)
 	if err != nil {
@@ -359,24 +359,24 @@ func setupBridgeIfNotExists() error {
 	return nil
 }
 
-func setupHostLocalInternalPort() error {
+func setupNodeLocalInternalPort() error {
 	command := []string{
-		"--may-exist", "add-port", bridgeName, hostLocalPort,
-		"--", "set", "Interface", hostLocalPort, "type=internal",
+		"--may-exist", "add-port", bridgeName, nodeLocalPort,
+		"--", "set", "Interface", nodeLocalPort, "type=internal",
 	}
 
 	out, err := exec.Command("ovs-vsctl", command...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to setup host-local port, err: %v, output: %q", err, out)
+		return fmt.Errorf("failed to setup node-local port, err: %v, output: %q", err, out)
 	}
 
-	hostLocal, err := netlink.LinkByName(hostLocalPort)
+	nodeLocal, err := netlink.LinkByName(nodeLocalPort)
 	if err != nil {
-		return fmt.Errorf("could not lookup %q: %v", hostLocalPort, err)
+		return fmt.Errorf("could not lookup %q: %v", nodeLocalPort, err)
 	}
 
-	if err := netlink.LinkSetUp(hostLocal); err != nil {
-		return fmt.Errorf("failed to bring bridge %q up: %v", hostLocalPort, err)
+	if err := netlink.LinkSetUp(nodeLocal); err != nil {
+		return fmt.Errorf("failed to bring bridge %q up: %v", nodeLocalPort, err)
 	}
 
 	return nil
@@ -454,19 +454,19 @@ func setupBridgeForwarding(podCIDR, clusterCIDR, serviceCIDR string) error {
 		return err
 	}
 
-	rules := []string{"-o", hostLocalPort, "-j", "ACCEPT"}
+	rules := []string{"-o", nodeLocalPort, "-j", "ACCEPT"}
 	err = ipt.AppendUnique("filter", "FORWARD", rules...)
 	if err != nil {
 		return err
 	}
 
-	rules = []string{"-i", hostLocalPort, "-j", "ACCEPT"}
+	rules = []string{"-i", nodeLocalPort, "-j", "ACCEPT"}
 	err = ipt.AppendUnique("filter", "FORWARD", rules...)
 	if err != nil {
 		return err
 	}
 
-	rules = []string{"-s", podCIDR, "!", "-o", hostLocalPort, "-j", "MASQUERADE"}
+	rules = []string{"-s", podCIDR, "!", "-o", nodeLocalPort, "-j", "MASQUERADE"}
 	err = ipt.AppendUnique("nat", "POSTROUTING", rules...)
 	if err != nil {
 		return err

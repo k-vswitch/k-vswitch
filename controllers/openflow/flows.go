@@ -94,18 +94,18 @@ func (c *controller) syncFlows() error {
 }
 
 func (c *controller) defaultFlows() error {
-	// default to host-local if none of the following classifer flows match
+	// default to node-local if none of the following classifer flows match
 	flow := flows.NewFlow().WithTable(tableClassification).
 		WithPriority(0).
-		WithOutputPort(c.hostLocalOFPort)
+		WithOutputPort(c.nodeLocalOFPort)
 	c.flows.AddFlow(flow)
 
-	// any IP traffic for the gatetway should go back out host-local port
+	// any IP traffic for the gatetway should go back out node-local port
 	// with a dl destination rewrite to account for traffic from the overlay
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("ip").
-		WithIPDest(c.gatewayIP).WithModDlDest(c.hostLocalMAC).
-		WithOutputPort(c.hostLocalOFPort)
+		WithIPDest(c.gatewayIP).WithModDlDest(c.nodeLocalMAC).
+		WithOutputPort(c.nodeLocalOFPort)
 	c.flows.AddFlow(flow)
 
 	// traffic in the local pod CIDR should go straight to tableL2Rewrites
@@ -120,10 +120,10 @@ func (c *controller) defaultFlows() error {
 		WithIPDest(c.clusterCIDR).WithResubmit(tableL3Forwarding)
 	c.flows.AddFlow(flow)
 
-	// arp for the gateway IP should go back to host-local
+	// arp for the gateway IP should go back to node-local
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("arp").
-		WithArpDest(c.gatewayIP).WithOutputPort(c.hostLocalOFPort)
+		WithArpDest(c.gatewayIP).WithOutputPort(c.nodeLocalOFPort)
 	c.flows.AddFlow(flow)
 
 	// arp for the local pod CIDR should go straigh to L2 rewrite
@@ -180,7 +180,7 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 		c.flows.AddFlow(flow)
 	}
 
-	// directly output to host-local port if dest address is the current node,
+	// directly output to node-local port if dest address is the current node,
 	// otherwise route back to overlay
 	nodeIP := vswitch.Spec.OverlayIP
 	if isCurrentNode {
@@ -188,13 +188,13 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 		// should go through host local port
 		flow := flows.NewFlow().WithTable(tableClassification).
 			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
-			WithArpSrc(podCIDR).WithOutputPort(c.hostLocalOFPort)
+			WithArpSrc(podCIDR).WithOutputPort(c.nodeLocalOFPort)
 		c.flows.AddFlow(flow)
 
 		flow = flows.NewFlow().WithTable(tableClassification).
 			WithPriority(100).WithProtocol("ip").
 			WithIPDest(nodeIP).WithIPSrc(podCIDR).
-			WithModDlDest(c.hostLocalMAC).WithOutputPort(c.hostLocalOFPort)
+			WithModDlDest(c.nodeLocalMAC).WithOutputPort(c.nodeLocalOFPort)
 		c.flows.AddFlow(flow)
 
 		// traffic towards the local node IP from the rest of the cluster
