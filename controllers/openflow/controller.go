@@ -70,7 +70,6 @@ type controller struct {
 
 	portCache *portCache
 
-	nodeLister    v1lister.NodeLister
 	podLister     v1lister.PodLister
 	nsLister      v1lister.NamespaceLister
 	netPolLister  netlister.NetworkPolicyLister
@@ -78,7 +77,6 @@ type controller struct {
 }
 
 func NewController(connManager connectionManager,
-	nodeInformer v1informer.NodeInformer,
 	podInformer v1informer.PodInformer,
 	namespaceInformer v1informer.NamespaceInformer,
 	netPolInformer netinformer.NetworkPolicyInformer,
@@ -121,7 +119,6 @@ func NewController(connManager connectionManager,
 		overlayOFPort:     overlayOFPort,
 		flows:             flows.NewFlowsBuffer(),
 		portCache:         NewPortCache(),
-		nodeLister:        nodeInformer.Lister(),
 		podLister:         podInformer.Lister(),
 		nsLister:          namespaceInformer.Lister(),
 		netPolLister:      netPolInformer.Lister(),
