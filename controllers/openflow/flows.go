@@ -22,28 +22,30 @@ package openflow
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/k-vswitch/k-vswitch/apis/kvswitch/v1alpha1"
 	"github.com/k-vswitch/k-vswitch/flows"
 
 	corev1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
 )
 
 const (
-	tableClassification         = 0
-	tableLocalARP               = 10
-	tableL3Forwarding           = 20
-	tableL2Forwarding           = 30
-	tableL3Rewrites             = 40
-	tableL2Rewrites             = 50
-	tableNetworkPoliciesIngress = 60
-	tableNetworkPoliciesEgress  = 70
-	tableProxy                  = 80
-	tableNAT                    = 90
-	tableAudit                  = 100
+	tableEntry           = 0
+	tableNetworkPolicies = 10
+	tableClassification  = 20
+	tableLocalARP        = 30
+	tableL3Forwarding    = 40
+	tableL2Forwarding    = 50
+	tableL3Rewrites      = 60
+	tableL2Rewrites      = 70
+	tableProxy           = 80
+	tableNAT             = 90
+	tableAudit           = 100
 )
 
 func (c *controller) syncFlows() error {
@@ -84,18 +86,42 @@ func (c *controller) syncFlows() error {
 		}
 	}
 
+	netPols, err := c.netPolLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("error getting network policies: %v", err)
+	}
+
+	for _, netPol := range netPols {
+		err = c.flowsForNetworkPolicy(netPol)
+		if err != nil {
+			klog.Warningf("error getting flows for network policy %q, err: %v",
+				netPol.Name, err)
+		}
+	}
+
 	err = c.flows.SyncFlows(c.bridgeName)
 	if err != nil {
 		return fmt.Errorf("error syncing flows: %v", err)
 	}
 
-	klog.V(5).Infof("full sync for flows took %s", time.Since(startTime).String())
+	klog.V(2).Infof("full sync for flows took %s", time.Since(startTime).String())
 	return nil
 }
 
 func (c *controller) defaultFlows() error {
+	// table entry, for now, always go directly to network policies
+	flow := flows.NewFlow().WithTable(tableEntry).
+		WithPriority(1000).WithResubmit(tableNetworkPolicies)
+	c.flows.AddFlow(flow)
+
+	// table network policy defaults to table classification
+	// higher priority rules will get added later as network policies are applied
+	flow = flows.NewFlow().WithTable(tableNetworkPolicies).
+		WithPriority(0).WithResubmit(tableClassification)
+	c.flows.AddFlow(flow)
+
 	// default to node-local if none of the following classifer flows match
-	flow := flows.NewFlow().WithTable(tableClassification).
+	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(0).
 		WithOutputPort(c.nodeLocalOFPort)
 	c.flows.AddFlow(flow)
@@ -295,6 +321,411 @@ func (c *controller) podNeedsUpdate(pod *corev1.Pod) (bool, error) {
 	return local, nil
 }
 
+func (c *controller) flowsForNetworkPolicy(netPol *netv1.NetworkPolicy) error {
+	// given a network polices, find all the associated local IPs based on
+	// the pod selector in the same network namespace as the network policy
+	matchLabels := labels.Set(netPol.Spec.PodSelector.MatchLabels)
+	pods, err := c.podLister.Pods(netPol.Namespace).List(matchLabels.AsSelector())
+	if err != nil {
+		return fmt.Errorf("error listing pods by pod selector: %v", err)
+	}
+
+	localPodIPs := []string{}
+	for _, pod := range pods {
+		podIP := pod.Status.PodIP
+		if podIP == "" {
+			// skip pods that do not have an IP assigned yet
+			continue
+		}
+
+		// if the pod is not local, then we shouldn't try to apply
+		// any network policies rules on this host
+		local, err := c.isLocalIP(podIP)
+		if err != nil {
+			klog.Warningf("error checking if podIP %q is local", podIP)
+			continue
+		}
+
+		if !local {
+			continue
+		}
+
+		localPodIPs = append(localPodIPs, podIP)
+	}
+
+	err = c.flowsForIngressNetworkPolicy(netPol, localPodIPs)
+	if err != nil {
+		klog.Errorf("error getting ingress policy flows for policy %q, err: %v", netPol.Name, err)
+	}
+
+	err = c.flowsForEgressNetworkPolicy(netPol, localPodIPs)
+	if err != nil {
+		klog.Errorf("error getting ingress policy flows for policy %q, err: %v", netPol.Name, err)
+	}
+
+	return nil
+}
+
+func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, localPodIPs []string) error {
+	// for each pod, add low priority flow to drop traffic that does not match
+	// any ingress network policy rules
+	for _, podIP := range localPodIPs {
+		// all traffic ingress towards the local pod IPs that match the pod
+		// selector match should have default drop action flow
+		// flows added as part of the pod selector match will have high priority
+		flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+			WithPriority(100).WithProtocol("ip").WithIPDest(podIP).WithDrop()
+		c.flows.AddFlow(flow)
+	}
+
+	ingressRules := netPol.Spec.Ingress
+	for _, ing := range ingressRules {
+		// for the case where an ingress rule has no From peers, we allow
+		// all ingress traffic specified by the ports, if no ports
+		// then we allow all "ip" traffic
+		if len(ing.From) == 0 {
+			// allow all ingress traffic based on ports
+			// i.e. ignore src address
+			for _, destIP := range localPodIPs {
+				// if no ports specified, allow traffic with src/dest match on all ports
+				if len(ing.Ports) == 0 {
+					flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+						WithPriority(1000).WithProtocol("ip").WithIPDest(destIP).
+						WithResubmit(tableClassification)
+					c.flows.AddFlow(flow)
+
+					continue
+				}
+
+				for _, port := range ing.Ports {
+					portNum := port.Port.IntValue()
+					protocol := strings.ToLower(string(*port.Protocol))
+
+					if protocol == "tcp" {
+						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+							WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
+							WithIPDest(destIP).WithResubmit(tableClassification)
+						c.flows.AddFlow(flow)
+					}
+
+					if protocol == "udp" {
+						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+							WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
+							WithIPDest(destIP).WithResubmit(tableClassification)
+						c.flows.AddFlow(flow)
+					}
+
+					// TODO: sctp
+				}
+			}
+
+			continue
+		}
+
+		// for each from block, go through all the possibe IPs
+		// and allow the port/protocol from ports
+		for _, from := range ing.From {
+			ipBlock := from.IPBlock
+			if ipBlock != nil {
+				srcIP := ipBlock.CIDR
+				for _, destIP := range localPodIPs {
+					flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1000).
+						WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
+						WithResubmit(tableClassification)
+					c.flows.AddFlow(flow)
+				}
+
+				// drop flow with higher priority for CIRDs in Except block
+				for _, srcIP := range ipBlock.Except {
+					for _, destIP := range localPodIPs {
+						flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1100).
+							WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
+							WithDrop()
+						c.flows.AddFlow(flow)
+					}
+				}
+
+				// according to NetworkPolicy API, if ipBlock is set, then any other
+				// field cannot be set, so continue to next FROM field.
+				continue
+			}
+
+			// pod / namespace selector matches
+
+			// at this point pod selector should be set,
+			// but we ignore this FROM block entirely if it's not
+			if from.PodSelector == nil {
+				continue
+			}
+
+			// default to namespace of the network policy resource
+			namespaces := []string{netPol.Namespace}
+			// if namespace selector is set, use the namespace list from selecttor
+			if from.NamespaceSelector != nil {
+				// TODO: account for empty match label list?
+				matchLabels := labels.Set(from.NamespaceSelector.MatchLabels)
+				nsList, err := c.nsLister.List(matchLabels.AsSelector())
+				if err != nil {
+					klog.Errorf("error listing namespaces: %v", err)
+					continue
+				}
+
+				if len(nsList) > 0 {
+					// if namespace selector is set, reset the default list
+					namespaces = []string{}
+					for _, ns := range nsList {
+						namespaces = append(namespaces, ns.Name)
+					}
+				}
+			}
+
+			for _, namespace := range namespaces {
+				// if match label is empty, then allow all
+				// otherwise, filter pods based on the match labels
+				var labelSelector labels.Selector
+				if len(from.PodSelector.MatchLabels) == 0 {
+					labelSelector = labels.Everything()
+				} else {
+					podMatchLabel := labels.Set(from.PodSelector.MatchLabels)
+					labelSelector = podMatchLabel.AsSelector()
+				}
+
+				pods, err := c.podLister.Pods(namespace).List(labelSelector)
+				if err != nil {
+					klog.Errorf("error listing pods in namespace %q, err: %v", namespace, err)
+					continue
+				}
+
+				// take list of source IPs and create flows
+				// allow traffic from all these IPs, default drop with lowest priority
+				srcIPs := getPodIPs(pods)
+				for _, destIP := range localPodIPs {
+					for _, srcIP := range srcIPs {
+						// if no ports specified, allow traffic with src/dest match on all ports
+						if len(ing.Ports) == 0 {
+							flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+								WithPriority(1000).WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
+								WithResubmit(tableClassification)
+							c.flows.AddFlow(flow)
+
+							continue
+						}
+
+						for _, port := range ing.Ports {
+							portNum := port.Port.IntValue()
+							protocol := strings.ToLower(string(*port.Protocol))
+
+							if protocol == "tcp" {
+								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+									WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
+									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+								c.flows.AddFlow(flow)
+							}
+
+							if protocol == "udp" {
+								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+									WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
+									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+								c.flows.AddFlow(flow)
+							}
+
+							// TODO: sctp
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, localPodIPs []string) error {
+	// for each pod, add low priority flow to drop traffic that does not match
+	// any egress network policy rules
+	for _, podIP := range localPodIPs {
+		// all traffic egress towards the local pod IPs that match the pod
+		// selector should have default drop action flow
+		// flows added as part of the pod selector match will have high priority
+		flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+			WithPriority(100).WithProtocol("ip").WithIPSrc(podIP).WithDrop()
+		c.flows.AddFlow(flow)
+	}
+
+	egressRules := netPol.Spec.Egress
+	for _, eg := range egressRules {
+		// for the case where an egress rule has no To peers, we allow
+		// all egress traffic specified by the ports, if no ports
+		// then we allow all "ip" traffic
+		if len(eg.To) == 0 {
+			// allow all egress traffic based on ports
+			// i.e. ignore destination address
+			for _, srcIP := range localPodIPs {
+				// if no ports specified, allow traffic with src/dest match on all ports
+				if len(eg.Ports) == 0 {
+					flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+						WithPriority(1000).WithProtocol("ip").WithIPSrc(srcIP).
+						WithResubmit(tableClassification)
+					c.flows.AddFlow(flow)
+
+					continue
+				}
+
+				for _, port := range eg.Ports {
+					portNum := port.Port.IntValue()
+					protocol := strings.ToLower(string(*port.Protocol))
+
+					if protocol == "tcp" {
+						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+							WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
+							WithIPSrc(srcIP).WithResubmit(tableClassification)
+						c.flows.AddFlow(flow)
+					}
+
+					if protocol == "udp" {
+						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+							WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
+							WithIPSrc(srcIP).WithResubmit(tableClassification)
+						c.flows.AddFlow(flow)
+					}
+
+					// TODO: sctp
+				}
+			}
+
+			continue
+		}
+
+		for _, to := range eg.To {
+			ipBlock := to.IPBlock
+			if ipBlock != nil {
+				destIP := ipBlock.CIDR
+				for _, srcIP := range localPodIPs {
+					flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1000).
+						WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
+						WithResubmit(tableClassification)
+					c.flows.AddFlow(flow)
+				}
+
+				// drop flow with higher priority for CIRDs in Except block
+				for _, destIP := range ipBlock.Except {
+					for _, srcIP := range localPodIPs {
+						flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1100).
+							WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
+							WithDrop()
+						c.flows.AddFlow(flow)
+					}
+				}
+
+				// according to NetworkPolicy API, if ipBlock is set, then any other
+				// field cannot be set, so continue to next FROM field.
+				continue
+			}
+
+			// pod / namespace selector matches
+
+			// at this point pod selector should be set,
+			// but we ignore this FROM block entirely if it's not
+			if to.PodSelector == nil {
+				continue
+			}
+
+			// default to namespace of the network policy resource
+			namespaces := []string{netPol.Namespace}
+			// if namespace selector is set, use the namespace list from selecttor
+			if to.NamespaceSelector != nil {
+				// TODO: account for empty match label list?
+				matchLabels := labels.Set(to.NamespaceSelector.MatchLabels)
+				nsList, err := c.nsLister.List(matchLabels.AsSelector())
+				if err != nil {
+					klog.Errorf("error listing namespaces: %v", err)
+					continue
+				}
+
+				if len(nsList) > 0 {
+					// if namespace selector is set, reset the default list
+					namespaces = []string{}
+					for _, ns := range nsList {
+						namespaces = append(namespaces, ns.Name)
+					}
+				}
+			}
+
+			for _, namespace := range namespaces {
+				// if match label is empty, then allow all,
+				// otherwise, filter pods based on the match labels
+				var labelSelector labels.Selector
+				if len(to.PodSelector.MatchLabels) == 0 {
+					labelSelector = labels.Everything()
+				} else {
+					podMatchLabel := labels.Set(to.PodSelector.MatchLabels)
+					labelSelector = podMatchLabel.AsSelector()
+				}
+
+				pods, err := c.podLister.Pods(namespace).List(labelSelector)
+				if err != nil {
+					klog.Errorf("error listing pods in namespace %q, err: %v", namespace, err)
+					continue
+				}
+
+				// take list of destination IPs and create flows
+				// allow traffic from all these IPs, default drop with lowest priority
+				destIPs := getPodIPs(pods)
+				for _, srcIP := range localPodIPs {
+					for _, destIP := range destIPs {
+						// if no ports specified, allow traffic with src/dest match on all ports
+						if len(eg.Ports) == 0 {
+							flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+								WithPriority(1000).WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
+								WithResubmit(tableClassification)
+							c.flows.AddFlow(flow)
+
+							continue
+						}
+
+						for _, port := range eg.Ports {
+							portNum := port.Port.IntValue()
+							protocol := strings.ToLower(string(*port.Protocol))
+
+							if protocol == "tcp" {
+								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+									WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
+									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+								c.flows.AddFlow(flow)
+							}
+
+							if protocol == "udp" {
+								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
+									WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
+									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+								c.flows.AddFlow(flow)
+							}
+
+							// TODO: sctp
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func getPodIPs(pods []*corev1.Pod) []string {
+	podIPs := []string{}
+	for _, pod := range pods {
+		podIP := pod.Status.PodIP
+		if podIP == "" {
+			continue
+		}
+
+		podIPs = append(podIPs, podIP)
+	}
+
+	return podIPs
+}
+
 func (c *controller) OnAddVSwitch(obj interface{}) {
 	err := c.syncFlows()
 	if err != nil {
@@ -365,4 +796,30 @@ func (c *controller) OnDeletePod(obj interface{}) {
 	}
 
 	c.portCache.DelPortInfo(pod)
+}
+
+func (c *controller) OnAddNetworkPolicy(obj interface{}) {
+	err := c.syncFlows()
+	if err != nil {
+		klog.Errorf("error syncing flows: %v", err)
+		return
+	}
+}
+
+func (c *controller) OnUpdateNetworkPolicy(oldObj, newObj interface{}) {
+	// TODO: check if needs update
+	err := c.syncFlows()
+	if err != nil {
+		klog.Errorf("error syncing flows: %v", err)
+		return
+	}
+}
+
+func (c *controller) OnDeleteNetworkPolicy(obj interface{}) {
+	err := c.syncFlows()
+	if err != nil {
+		klog.Errorf("error syncing flows: %v", err)
+		return
+	}
+
 }

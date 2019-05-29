@@ -219,6 +219,8 @@ func main() {
 	informerFactory := informers.NewSharedInformerFactory(clientset, 0)
 	nodeInformer := informerFactory.Core().V1().Nodes()
 	podInformer := informerFactory.Core().V1().Pods()
+	nsInformer := informerFactory.Core().V1().Namespaces()
+	netPolInformer := informerFactory.Networking().V1().NetworkPolicies()
 
 	kvswitchInformerFactory := kvswitchinformer.NewSharedInformerFactory(kvswitchClientset, 0)
 	vswitchInformer := kvswitchInformerFactory.Kvswitch().V1alpha1().VSwitchConfigs()
@@ -230,7 +232,7 @@ func main() {
 	}
 
 	c, err := openflow.NewController(connectionManager, nodeInformer,
-		podInformer, vswitchInformer, bridgeName,
+		podInformer, nsInformer, netPolInformer, vswitchInformer, bridgeName,
 		nodeLocalInterface.HardwareAddr.String(),
 		clusterWideInterface.HardwareAddr.String(),
 		curNode.Name, podCIDR, clusterCIDR)
@@ -248,6 +250,11 @@ func main() {
 		AddFunc:    c.OnAddPod,
 		UpdateFunc: c.OnUpdatePod,
 		DeleteFunc: c.OnDeletePod,
+	})
+	netPolInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.OnAddNetworkPolicy,
+		UpdateFunc: c.OnUpdateNetworkPolicy,
+		DeleteFunc: c.OnDeleteNetworkPolicy,
 	})
 
 	if err = c.Initialize(); err != nil {
