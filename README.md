@@ -1,6 +1,6 @@
 # k-vswitch
 
-k-vswitch is an easy-to-operate and high performance Kubernetes networking plugin based on [Open vSwitch](https://www.openvswitch.org/).
+k-vswitch is an easy-to-operate, high performance and secure Kubernetes networking plugin based on [Open vSwitch](https://www.openvswitch.org/).
 
 **WARNING**: k-vswitch is in active development and is not advised for production environments. There will be a production-ready release in the future.
 
@@ -87,5 +87,7 @@ GRE traffic over VM network so you may need to use VxLAN in that case.
 
 k-vswitch is in active development with the following features planned for the near-future:
 
+* **Native Pod Routing** - integrate with kube-router to do BGP native routing to pods along with k-vswitch (i.e. no overlay)
+* **Service Proxy** - implement kube-proxy like load balancing for Kubernetes Services via OpenFlow
+* **Pod Traffic Telemetry** - traffic telemetry for pods using sFlow on Open vSwitch
 * **Windows support** - k-vswitch is currently only supported on Linux. Since OVS supports Windows, k-vswitch may support it in the future.
-* **Direct Routing** - integrate with other networking plugins like kube-router to do BGP direct routing to pods along with k-vswitch (i.e. no overlay)
