@@ -28,16 +28,21 @@ type Flow struct {
 	table    int
 	priority int
 
-	protocol string
-	ipDest   string
-	ipSrc    string
-	arpDest  string
-	arpSrc   string
+	protocol    string
+	ipDest      string
+	ipSrc       string
+	arpDest     string
+	arpSrc      string
+	tcpDestPort int
+	tcpSrcPort  int
+	udpDestPort int
+	udpSrcPort  int
 
 	tunDest   string
 	modDlDest string
 	output    int
 	resubmit  int
+	drop      bool
 }
 
 func NewFlow() *Flow {
@@ -67,6 +72,22 @@ func (f *Flow) String() string {
 		flow = fmt.Sprintf("%s arp_spa=%s", flow, f.arpSrc)
 	}
 
+	if f.tcpDestPort != 0 {
+		flow = fmt.Sprintf("%s tcp_dst=%d", flow, f.tcpDestPort)
+	}
+
+	if f.tcpSrcPort != 0 {
+		flow = fmt.Sprintf("%s tcp_src=%d", flow, f.tcpSrcPort)
+	}
+
+	if f.udpDestPort != 0 {
+		flow = fmt.Sprintf("%s udp_dst=%d", flow, f.udpDestPort)
+	}
+
+	if f.udpSrcPort != 0 {
+		flow = fmt.Sprintf("%s udp_src=%d", flow, f.udpSrcPort)
+	}
+
 	var actionSet []string
 	if f.modDlDest != "" {
 		actionSet = append(actionSet, fmt.Sprintf("mod_dl_dst:%s", f.modDlDest))
@@ -82,6 +103,10 @@ func (f *Flow) String() string {
 
 	if f.resubmit != 0 {
 		actionSet = append(actionSet, fmt.Sprintf("resubmit(,%d)", f.resubmit))
+	}
+
+	if f.drop {
+		actionSet = append(actionSet, "drop")
 	}
 
 	actions := fmt.Sprintf("actions=%s", strings.Join(actionSet, ","))
@@ -129,6 +154,26 @@ func (f *Flow) WithArpSrc(arpSrc string) *Flow {
 	return f
 }
 
+func (f *Flow) WithTCPSrcPort(srcPort int) *Flow {
+	f.tcpSrcPort = srcPort
+	return f
+}
+
+func (f *Flow) WithTCPDestPort(dstPort int) *Flow {
+	f.tcpDestPort = dstPort
+	return f
+}
+
+func (f *Flow) WithUDPSrcPort(srcPort int) *Flow {
+	f.udpSrcPort = srcPort
+	return f
+}
+
+func (f *Flow) WithUDPDestPort(dstPort int) *Flow {
+	f.udpDestPort = dstPort
+	return f
+}
+
 func (f *Flow) WithModDlDest(dstMac string) *Flow {
 	f.modDlDest = dstMac
 	return f
@@ -141,6 +186,11 @@ func (f *Flow) WithTunnelDest(tunDst string) *Flow {
 
 func (f *Flow) WithOutputPort(output int) *Flow {
 	f.output = output
+	return f
+}
+
+func (f *Flow) WithDrop() *Flow {
+	f.drop = true
 	return f
 }
 

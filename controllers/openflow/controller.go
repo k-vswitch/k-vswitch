@@ -32,7 +32,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 	v1informer "k8s.io/client-go/informers/core/v1"
+	netinformer "k8s.io/client-go/informers/networking/v1"
 	v1lister "k8s.io/client-go/listers/core/v1"
+	netlister "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/klog"
 )
 
@@ -70,12 +72,16 @@ type controller struct {
 
 	nodeLister    v1lister.NodeLister
 	podLister     v1lister.PodLister
+	nsLister      v1lister.NamespaceLister
+	netPolLister  netlister.NetworkPolicyLister
 	vswitchLister kvswitchlister.VSwitchConfigLister
 }
 
 func NewController(connManager connectionManager,
 	nodeInformer v1informer.NodeInformer,
 	podInformer v1informer.PodInformer,
+	namespaceInformer v1informer.NamespaceInformer,
+	netPolInformer netinformer.NetworkPolicyInformer,
 	kvswitchInformer kvswitchinformers.VSwitchConfigInformer,
 	bridgeName, nodeLocalMAC, clusterWideMAC, nodeName,
 	podCIDR, clusterCIDR string) (*controller, error) {
@@ -117,6 +123,8 @@ func NewController(connManager connectionManager,
 		portCache:         NewPortCache(),
 		nodeLister:        nodeInformer.Lister(),
 		podLister:         podInformer.Lister(),
+		nsLister:          namespaceInformer.Lister(),
+		netPolLister:      netPolInformer.Lister(),
 		vswitchLister:     kvswitchInformer.Lister(),
 	}, nil
 }
