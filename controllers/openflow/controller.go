@@ -39,7 +39,6 @@ import (
 )
 
 const (
-	nodeLocalPort   = "node-local"
 	clusterWidePort = "cluster-wide"
 	overlayPort     = "overlay0"
 )
@@ -53,15 +52,14 @@ type controller struct {
 	datapathID  uint64
 	connManager connectionManager
 
-	nodeName       string
-	bridgeName     string
-	gatewayIP      string
-	nodeLocalMAC   string
-	clusterWideMAC string
-	podCIDR        string
-	clusterCIDR    string
-
-	nodeLocalOFPort   int
+	nodeName          string
+	bridgeName        string
+	gatewayIP         string
+	bridgeMAC         string
+	clusterWideMAC    string
+	podCIDR           string
+	clusterCIDR       string
+	serviceCIDR       string
 	clusterWideOFPort int
 	overlayOFPort     int
 
@@ -81,19 +79,14 @@ func NewController(connManager connectionManager,
 	namespaceInformer v1informer.NamespaceInformer,
 	netPolInformer netinformer.NetworkPolicyInformer,
 	kvswitchInformer kvswitchinformers.VSwitchConfigInformer,
-	bridgeName, nodeLocalMAC, clusterWideMAC, nodeName,
-	podCIDR, clusterCIDR string) (*controller, error) {
+	bridgeName, bridgeMac, clusterWideMAC, nodeName,
+	podCIDR, clusterCIDR, serviceCIDR string) (*controller, error) {
 
 	_, podIPNet, err := net.ParseCIDR(podCIDR)
 	if err != nil {
 		return nil, err
 	}
 	gatewayIP := ip.NextIP(podIPNet.IP.Mask(podIPNet.Mask)).String()
-
-	nodeLocalOFPort, err := ofPortFromName(nodeLocalPort)
-	if err != nil {
-		return nil, err
-	}
 
 	clusterWideOFPort, err := ofPortFromName(clusterWidePort)
 	if err != nil {
@@ -110,11 +103,11 @@ func NewController(connManager connectionManager,
 		nodeName:          nodeName,
 		bridgeName:        bridgeName,
 		gatewayIP:         gatewayIP,
-		nodeLocalMAC:      nodeLocalMAC,
+		bridgeMAC:         bridgeMac,
 		clusterWideMAC:    clusterWideMAC,
 		podCIDR:           podCIDR,
 		clusterCIDR:       clusterCIDR,
-		nodeLocalOFPort:   nodeLocalOFPort,
+		serviceCIDR:       serviceCIDR,
 		clusterWideOFPort: clusterWideOFPort,
 		overlayOFPort:     overlayOFPort,
 		flows:             flows.NewFlowsBuffer(),

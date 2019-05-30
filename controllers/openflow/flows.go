@@ -37,8 +37,8 @@ import (
 const (
 	tableEntry           = 0
 	tableNetworkPolicies = 10
-	tableClassification  = 20
-	tableLocalARP        = 30
+	tableLocalARP        = 20
+	tableClassification  = 30
 	tableL3Forwarding    = 40
 	tableL2Forwarding    = 50
 	tableL3Rewrites      = 60
@@ -109,8 +109,14 @@ func (c *controller) syncFlows() error {
 }
 
 func (c *controller) defaultFlows() error {
-	// table entry, for now, always go directly to network policies
+	// arp for the gateway IP should go back to node-local
 	flow := flows.NewFlow().WithTable(tableEntry).
+		WithPriority(41000).WithProtocol("arp").
+		WithNormal()
+	c.flows.AddFlow(flow)
+
+	// table entry, for now, always go directly to network policies
+	flow = flows.NewFlow().WithTable(tableEntry).
 		WithPriority(1000).WithResubmit(tableNetworkPolicies)
 	c.flows.AddFlow(flow)
 
@@ -120,18 +126,11 @@ func (c *controller) defaultFlows() error {
 		WithPriority(0).WithResubmit(tableClassification)
 	c.flows.AddFlow(flow)
 
-	// default to node-local if none of the following classifer flows match
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(0).
-		WithOutputPort(c.nodeLocalOFPort)
-	c.flows.AddFlow(flow)
-
-	// any IP traffic for the gatetway should go back out node-local port
+	// any IP traffic for the gateway should go back out the bridge interface
 	// with a dl destination rewrite to account for traffic from the overlay
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("ip").
-		WithIPDest(c.gatewayIP).WithModDlDest(c.nodeLocalMAC).
-		WithOutputPort(c.nodeLocalOFPort)
+		WithIPDest(c.gatewayIP).WithEthDest(c.bridgeMAC).WithLocal()
 	c.flows.AddFlow(flow)
 
 	// traffic in the local pod CIDR should go straight to tableL2Rewrites
@@ -144,24 +143,6 @@ func (c *controller) defaultFlows() error {
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(100).WithProtocol("ip").
 		WithIPDest(c.clusterCIDR).WithResubmit(tableL3Forwarding)
-	c.flows.AddFlow(flow)
-
-	// arp for the gateway IP should go back to node-local
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(500).WithProtocol("arp").
-		WithArpDest(c.gatewayIP).WithOutputPort(c.nodeLocalOFPort)
-	c.flows.AddFlow(flow)
-
-	// arp for the local pod CIDR should go straigh to L2 rewrite
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(300).WithProtocol("arp").
-		WithArpDest(c.podCIDR).WithResubmit(tableL2Rewrites)
-	c.flows.AddFlow(flow)
-
-	// arp traffic towards the cluster CIDR should go to tableL2Forwarding
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(100).WithProtocol("arp").
-		WithArpDest(c.clusterCIDR).WithResubmit(tableL2Forwarding)
 	c.flows.AddFlow(flow)
 
 	return nil
@@ -187,47 +168,24 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 			WithIPDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
 			WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
-
-		flow = flows.NewFlow().WithTable(tableL2Forwarding).
-			WithPriority(150).WithProtocol("arp").
-			WithArpDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
-			WithOutputPort(c.overlayOFPort)
-		c.flows.AddFlow(flow)
-
 	} else {
 		flow := flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
 			WithResubmit(tableL2Rewrites)
 		c.flows.AddFlow(flow)
 
-		flow = flows.NewFlow().WithTable(tableL2Forwarding).
-			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
-			WithResubmit(tableL2Rewrites)
-		c.flows.AddFlow(flow)
 	}
 
-	// directly output to node-local port if dest address is the current node,
+	// directly output to local bridge interface if dest address is the current node,
 	// otherwise route back to overlay
 	nodeIP := vswitch.Spec.OverlayIP
 	if isCurrentNode {
 		// traffic towards the local node IP from local pod CIDR
-		// should go through host local port
+		// should go through vSwitch bridge
 		flow := flows.NewFlow().WithTable(tableClassification).
-			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
-			WithArpSrc(podCIDR).WithOutputPort(c.nodeLocalOFPort)
-		c.flows.AddFlow(flow)
-
-		flow = flows.NewFlow().WithTable(tableClassification).
 			WithPriority(100).WithProtocol("ip").
 			WithIPDest(nodeIP).WithIPSrc(podCIDR).
-			WithModDlDest(c.nodeLocalMAC).WithOutputPort(c.nodeLocalOFPort)
-		c.flows.AddFlow(flow)
-
-		// traffic towards the local node IP from the rest of the cluster
-		// should go through cluster wide port
-		flow = flows.NewFlow().WithTable(tableClassification).
-			WithPriority(50).WithProtocol("arp").WithArpDest(nodeIP).
-			WithOutputPort(c.clusterWideOFPort)
+			WithEthDest(c.bridgeMAC).WithLocal()
 		c.flows.AddFlow(flow)
 
 		flow = flows.NewFlow().WithTable(tableClassification).
@@ -299,11 +257,6 @@ func (c *controller) flowsForPod(pod *corev1.Pod) error {
 		WithProtocol("ip").WithIPDest(podIP).WithModDlDest(podMacAddr).
 		WithOutputPort(ofport)
 	c.flows.AddFlow(flow)
-
-	flow = flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
-		WithProtocol("arp").WithArpDest(podIP).WithOutputPort(ofport)
-	c.flows.AddFlow(flow)
-
 	return nil
 }
 

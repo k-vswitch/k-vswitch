@@ -31,6 +31,7 @@ type Flow struct {
 	protocol    string
 	ipDest      string
 	ipSrc       string
+	ethDest     string
 	arpDest     string
 	arpSrc      string
 	tcpDestPort int
@@ -43,6 +44,8 @@ type Flow struct {
 	output    int
 	resubmit  int
 	drop      bool
+	local     bool
+	normal    bool
 }
 
 func NewFlow() *Flow {
@@ -89,6 +92,10 @@ func (f *Flow) String() string {
 	}
 
 	var actionSet []string
+	if f.ethDest != "" {
+		actionSet = append(actionSet, fmt.Sprintf("set_field:%s->eth_dst", f.ethDest))
+	}
+
 	if f.modDlDest != "" {
 		actionSet = append(actionSet, fmt.Sprintf("mod_dl_dst:%s", f.modDlDest))
 	}
@@ -105,8 +112,16 @@ func (f *Flow) String() string {
 		actionSet = append(actionSet, fmt.Sprintf("resubmit(,%d)", f.resubmit))
 	}
 
+	if f.local {
+		actionSet = append(actionSet, "local")
+	}
+
 	if f.drop {
 		actionSet = append(actionSet, "drop")
+	}
+
+	if f.normal {
+		actionSet = append(actionSet, "normal")
 	}
 
 	actions := fmt.Sprintf("actions=%s", strings.Join(actionSet, ","))
@@ -179,6 +194,11 @@ func (f *Flow) WithModDlDest(dstMac string) *Flow {
 	return f
 }
 
+func (f *Flow) WithEthDest(ethDst string) *Flow {
+	f.ethDest = ethDst
+	return f
+}
+
 func (f *Flow) WithTunnelDest(tunDst string) *Flow {
 	f.tunDest = tunDst
 	return f
@@ -191,6 +211,16 @@ func (f *Flow) WithOutputPort(output int) *Flow {
 
 func (f *Flow) WithDrop() *Flow {
 	f.drop = true
+	return f
+}
+
+func (f *Flow) WithLocal() *Flow {
+	f.local = true
+	return f
+}
+
+func (f *Flow) WithNormal() *Flow {
+	f.normal = true
 	return f
 }
 
