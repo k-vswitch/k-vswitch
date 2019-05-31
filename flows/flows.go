@@ -24,25 +24,62 @@ import (
 	"strings"
 )
 
-type Flow struct {
-	table    int
-	priority int
+const (
+	NXM_OF_ARP_OP  = "NXM_OF_ARP_OP[]"
+	NXM_OF_ETH_DST = "NXM_OF_ETH_DST[]"
+	NXM_OF_ETH_SRC = "NXM_OF_ETH_SRC[]"
+	NXM_NX_ARP_SHA = "NXM_NX_ARP_SHA[]"
+	NXM_NX_ARP_THA = "NXM_NX_ARP_THA[]"
+	NXM_OF_ARP_SPA = "NXM_OF_ARP_SPA[]"
+	NXM_OF_ARP_TPA = "NXM_OF_ARP_TPA[]"
 
-	protocol    string
-	ipDest      string
-	ipSrc       string
-	arpDest     string
-	arpSrc      string
+	ARP_RESPONSE  = "0x2"
+    ETH_DST = "eth_dst"
+	ETH_SRC = "eth_src"
+
+	Move Action = "move"
+	Load Action = "load"
+	SetField Action = "set"
+)
+
+type Action string
+
+type TargetAction struct {
+	Source     string
+	Target     string
+	ActionType Action
+}
+
+type PriortyAction struct {
+	action string
+	priority int
+}
+
+
+type Flow struct {
+	table       int
+	priority    int
 	tcpDestPort int
 	tcpSrcPort  int
 	udpDestPort int
 	udpSrcPort  int
+	output      int
+	resubmit    int
 
+	protocol  string
+	ipDest    string
+	ipSrc     string
+	arpDest   string
+	arpSrc    string
 	tunDest   string
 	modDlDest string
-	output    int
-	resubmit  int
-	drop      bool
+	modDlSrc string
+
+	drop bool
+	local     bool
+	inPort bool
+
+	targetActions []TargetAction
 }
 
 func NewFlow() *Flow {
@@ -89,8 +126,16 @@ func (f *Flow) String() string {
 	}
 
 	var actionSet []string
+	if f.local {
+		actionSet = append(actionSet, "local")
+	}
+
 	if f.modDlDest != "" {
 		actionSet = append(actionSet, fmt.Sprintf("mod_dl_dst:%s", f.modDlDest))
+	}
+
+	if f.modDlSrc != "" {
+		actionSet = append(actionSet, fmt.Sprintf("mod_dl_src:%s", f.modDlSrc))
 	}
 
 	if f.tunDest != "" {
@@ -109,16 +154,32 @@ func (f *Flow) String() string {
 		actionSet = append(actionSet, "drop")
 	}
 
-	actions := fmt.Sprintf("actions=%s", strings.Join(actionSet, ","))
+	if f.targetActions != nil {
+		for _, action := range f.targetActions {
+			switch action.ActionType {
+			case Move:
+				actionSet = append(actionSet, fmt.Sprintf("move:%s->%s", action.Source, action.Target))
+			case Load:
+				actionSet = append(actionSet, fmt.Sprintf("load:%s->%s", action.Source, action.Target))
+			case SetField:
+				actionSet = append(actionSet, fmt.Sprintf("set_field:%s->%s", action.Source, action.Target))
+			}
+		}
+	}
 
-	flow = fmt.Sprintf("%s %s", flow, actions)
-	return flow
+	if f.inPort {
+		actionSet = append(actionSet, "in_port")
+	}
+
+	actions := fmt.Sprintf("actions=%s", strings.Join(actionSet, ","))
+	return  fmt.Sprintf("%s %s", flow, actions)
 }
 
 func (f *Flow) Validate() error {
 	return nil
 }
 
+// Flow Matchers
 func (f *Flow) WithTable(table int) *Flow {
 	f.table = table
 	return f
@@ -174,27 +235,52 @@ func (f *Flow) WithUDPDestPort(dstPort int) *Flow {
 	return f
 }
 
-func (f *Flow) WithModDlDest(dstMac string) *Flow {
+// Actions
+func (f *Flow) WithActionModDlDest(dstMac string) *Flow {
 	f.modDlDest = dstMac
 	return f
 }
 
-func (f *Flow) WithTunnelDest(tunDst string) *Flow {
+func (f *Flow) WithActionModDlSrc(srcMac string) *Flow {
+	f.modDlSrc = srcMac
+	return f
+}
+
+
+func (f *Flow) WithActionTunnelDest(tunDst string) *Flow {
 	f.tunDest = tunDst
 	return f
 }
 
-func (f *Flow) WithOutputPort(output int) *Flow {
+func (f *Flow) WithActionOutputPort(output int) *Flow {
 	f.output = output
 	return f
 }
 
-func (f *Flow) WithDrop() *Flow {
+func (f *Flow) WithActionDrop() *Flow {
 	f.drop = true
 	return f
 }
 
-func (f *Flow) WithResubmit(table int) *Flow {
+func (f *Flow) WithActionResubmit(table int) *Flow {
 	f.resubmit = table
 	return f
 }
+
+func (f *Flow) WithInPort() *Flow {
+	f.inPort = true
+	return f
+}
+
+func (f *Flow) WithLocal() *Flow {
+	f.local = true
+	return f
+}
+
+func (f *Flow) WithTargetAction(targetAction TargetAction) *Flow {
+	f.targetActions = append(f.targetActions, targetAction)
+	return f
+}
+
+
+

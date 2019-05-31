@@ -96,6 +96,27 @@ func Test_Flow(t *testing.T) {
 			},
 			flowString: "table=0 priority=100 ip nw_dst=10.0.0.1 actions=resubmit(,20)",
 		},
+		{
+			name: "arp responder flow",
+			flow: &Flow{
+				table:    20,
+				priority: 500,
+				protocol: "arp",
+				ipDest:   "10.0.0.1",
+				targetActions: []TargetAction{
+					{
+					ActionType: Action("move"),
+					Source:NXM_OF_ETH_SRC,
+					Target:NXM_OF_ETH_DST,
+				},
+					{
+						ActionType: Action("load"),
+						Source:ARP_RESPONSE,
+						Target:NXM_OF_ARP_OP,
+					},
+			},},
+			flowString: "table=20 priority=500 arp nw_dst=10.0.0.1 actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],load:0x2->NXM_OF_ARP_OP[]",
+		},
 	}
 
 	for _, test := range tests {
