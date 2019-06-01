@@ -224,7 +224,6 @@ func setupVeth(netns ns.NetNS, ifName string) (*current.Interface, *current.Inte
 		contIface.Mac = containerVeth.HardwareAddr.String()
 		contIface.Sandbox = netns.Path()
 		hostIface.Name = hostVeth.Name
-		// hostIface.Sandbox = hostNS.Path() // this doesn't exist in other plugins
 		return nil
 	})
 	if err != nil {
@@ -237,12 +236,6 @@ func setupVeth(netns ns.NetNS, ifName string) (*current.Interface, *current.Inte
 		return nil, nil, fmt.Errorf("failed to lookup %q: %v", hostIface.Name, err)
 	}
 	hostIface.Mac = hostVeth.Attrs().HardwareAddr.String()
-
-	// connect host veth end to the bridge
-	// TODO: should this actually be done using OVS to `ovs-vsctl add-port br0 hostVeth`?
-	// if err := netlink.LinkSetMaster(hostVeth, br); err != nil {
-	//	return nil, nil, fmt.Errorf("failed to connect %q to bridge %v: %v", hostVeth.Attrs().Name, br.Attrs().Name, err)
-	// }
 
 	// set hairpin mode, do we need this?
 	// if err = netlink.LinkSetHairpin(hostVeth, hairpinMode); err != nil {
