@@ -42,6 +42,9 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+// NOTE: portions of the code in this file are copied from
+// github.om/containernetworking/plugins
+
 const defaultBridgeName = "k-vswitch0"
 
 type NetConf struct {
@@ -216,7 +219,7 @@ func setupVeth(netns ns.NetNS, ifName string) (*current.Interface, *current.Inte
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
 		// TODO don't hardcode the MTU
-		hostVeth, containerVeth, err := ip.SetupVeth(ifName, 1500, hostNS)
+		hostVeth, containerVeth, err := setupVethPair(ifName, 1500, hostNS)
 		if err != nil {
 			return err
 		}
