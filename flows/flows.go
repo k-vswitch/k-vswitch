@@ -43,6 +43,8 @@ type Flow struct {
 	output    int
 	resubmit  int
 	drop      bool
+
+	raw string
 }
 
 func NewFlow() *Flow {
@@ -50,6 +52,12 @@ func NewFlow() *Flow {
 }
 
 func (f *Flow) String() string {
+	// raw flow inputs take precedence, this is useful for flow entries that are
+	// less common and don't warrant helper methods, arp responder is a good use-case
+	if f.raw != "" {
+		return f.raw
+	}
+
 	flow := fmt.Sprintf("table=%d priority=%d", f.table, f.priority)
 
 	if f.protocol != "" {
@@ -196,5 +204,10 @@ func (f *Flow) WithDrop() *Flow {
 
 func (f *Flow) WithResubmit(table int) *Flow {
 	f.resubmit = table
+	return f
+}
+
+func (f *Flow) WithRaw(raw string) *Flow {
+	f.raw = raw
 	return f
 }
