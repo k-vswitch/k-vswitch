@@ -38,14 +38,17 @@ const (
 	tableEntry           = 0
 	tableNetworkPolicies = 10
 	tableClassification  = 20
-	tableLocalARP        = 30
-	tableL3Forwarding    = 40
-	tableL2Forwarding    = 50
-	tableL3Rewrites      = 60
-	tableL2Rewrites      = 70
-	tableProxy           = 80
-	tableNAT             = 90
-	tableAudit           = 100
+	tableL3Forwarding    = 30
+	tableL2Forwarding    = 40
+	tableL3Rewrites      = 50
+	tableL2Rewrites      = 60
+	tableProxy           = 70
+	tableNAT             = 80
+	tableAudit           = 90
+	tableLocalARP        = 100
+
+	// all pods have a fixed mac addr
+	podMacAddr = "aa:bb:cc:dd:ee:ff"
 )
 
 func (c *controller) syncFlows() error {
@@ -146,22 +149,20 @@ func (c *controller) defaultFlows() error {
 		WithIPDest(c.clusterCIDR).WithResubmit(tableL3Forwarding)
 	c.flows.AddFlow(flow)
 
-	// arp for the gateway IP should go back to node-local
 	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(500).WithProtocol("arp").
-		WithArpDest(c.gatewayIP).WithOutputPort(c.nodeLocalOFPort)
+		WithPriority(100).WithProtocol("arp").WithResubmit(tableLocalARP)
 	c.flows.AddFlow(flow)
 
-	// arp for the local pod CIDR should go straigh to L2 rewrite
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(300).WithProtocol("arp").
-		WithArpDest(c.podCIDR).WithResubmit(tableL2Rewrites)
+	// arp responder for gateway IP
+	rawFlow := fmt.Sprintf("table=%d priority=500 dl_type=0x0806 arp_tpa=%s actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],set_field:%s->arp_sha,set_field:%s->arp_spa,in_port",
+		tableLocalARP, c.gatewayIP, c.nodeLocalMAC, c.nodeLocalMAC, c.gatewayIP)
+	flow = flows.NewFlow().WithRaw(rawFlow)
 	c.flows.AddFlow(flow)
 
-	// arp traffic towards the cluster CIDR should go to tableL2Forwarding
-	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(100).WithProtocol("arp").
-		WithArpDest(c.clusterCIDR).WithResubmit(tableL2Forwarding)
+	// ARP responder for cluster CIDR
+	rawFlow = fmt.Sprintf("table=%d priority=400 dl_type=0x0806 arp_tpa=%s actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],set_field:%s->arp_sha,move:NXM_OF_ARP_TPA[]->NXM_OF_ARP_SPA[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],in_port",
+		tableLocalARP, c.clusterCIDR, podMacAddr, podMacAddr)
+	flow = flows.NewFlow().WithRaw(rawFlow)
 	c.flows.AddFlow(flow)
 
 	return nil
@@ -188,20 +189,9 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 			WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 
-		flow = flows.NewFlow().WithTable(tableL2Forwarding).
-			WithPriority(150).WithProtocol("arp").
-			WithArpDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
-			WithOutputPort(c.overlayOFPort)
-		c.flows.AddFlow(flow)
-
 	} else {
 		flow := flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
-			WithResubmit(tableL2Rewrites)
-		c.flows.AddFlow(flow)
-
-		flow = flows.NewFlow().WithTable(tableL2Forwarding).
-			WithPriority(100).WithProtocol("arp").WithArpDest(podCIDR).
 			WithResubmit(tableL2Rewrites)
 		c.flows.AddFlow(flow)
 	}
@@ -210,24 +200,10 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 	// otherwise route back to overlay
 	nodeIP := vswitch.Spec.OverlayIP
 	if isCurrentNode {
-		// traffic towards the local node IP from local pod CIDR
-		// should go through host local port
 		flow := flows.NewFlow().WithTable(tableClassification).
-			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
-			WithArpSrc(podCIDR).WithOutputPort(c.nodeLocalOFPort)
-		c.flows.AddFlow(flow)
-
-		flow = flows.NewFlow().WithTable(tableClassification).
 			WithPriority(100).WithProtocol("ip").
 			WithIPDest(nodeIP).WithIPSrc(podCIDR).
 			WithModDlDest(c.nodeLocalMAC).WithOutputPort(c.nodeLocalOFPort)
-		c.flows.AddFlow(flow)
-
-		// traffic towards the local node IP from the rest of the cluster
-		// should go through cluster wide port
-		flow = flows.NewFlow().WithTable(tableClassification).
-			WithPriority(50).WithProtocol("arp").WithArpDest(nodeIP).
-			WithOutputPort(c.clusterWideOFPort)
 		c.flows.AddFlow(flow)
 
 		flow = flows.NewFlow().WithTable(tableClassification).
@@ -241,21 +217,9 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 			WithResubmit(tableL3Forwarding)
 		c.flows.AddFlow(flow)
 
-		// for ARP traffic to remote node IP, send to L2 forwarding
-		flow = flows.NewFlow().WithTable(tableClassification).
-			WithPriority(50).WithProtocol("arp").WithArpDest(nodeIP).
-			WithResubmit(tableL2Forwarding)
-		c.flows.AddFlow(flow)
-
 		// send IP traffic to remote node IP through tunnel
 		flow = flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(nodeIP).
-			WithTunnelDest(nodeIP).WithOutputPort(c.overlayOFPort)
-		c.flows.AddFlow(flow)
-
-		// send ARP traffic to node IP through tunnel
-		flow = flows.NewFlow().WithTable(tableL2Forwarding).
-			WithPriority(100).WithProtocol("arp").WithArpDest(nodeIP).
 			WithTunnelDest(nodeIP).WithOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 	}
@@ -292,7 +256,6 @@ func (c *controller) flowsForPod(pod *corev1.Pod) error {
 		return fmt.Errorf("error checking port info for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
 
-	podMacAddr := podPortInfo.mac
 	ofport := podPortInfo.ofport
 
 	flow := flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
@@ -300,8 +263,10 @@ func (c *controller) flowsForPod(pod *corev1.Pod) error {
 		WithOutputPort(ofport)
 	c.flows.AddFlow(flow)
 
-	flow = flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
-		WithProtocol("arp").WithArpDest(podIP).WithOutputPort(ofport)
+	// arp responder per pod IP
+	rawFlow := fmt.Sprintf("table=%d priority=500 dl_type=0x0806 arp_tpa=%s actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],set_field:%s->arp_sha,set_field:%s->arp_spa,in_port",
+		tableLocalARP, podIP, podMacAddr, podMacAddr, podIP)
+	flow = flows.NewFlow().WithRaw(rawFlow)
 	c.flows.AddFlow(flow)
 
 	return nil
