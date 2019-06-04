@@ -118,7 +118,7 @@ spec:
       serviceAccountName: k-vswitch
       containers:
       - name: k-vswitch-controller
-        image: kvswitch/k-vswitch:v0.0.1
+        image: kvswitch/k-vswitch:v0.0.2
         command:
          - "/bin/k-vswitch-controller"
          - "--cluster-cidr=$(K_VSWITCH_CLUSTER_CIDR)"
@@ -163,7 +163,7 @@ spec:
       serviceAccountName: k-vswitch
       containers:
       - name: k-vswitchd
-        image: kvswitch/k-vswitch:v0.0.1
+        image: kvswitch/k-vswitch:v0.0.2
         env:
         - name: NODE_NAME
           valueFrom:
@@ -184,7 +184,7 @@ spec:
             name: lib-modules
       initContainers:
       - name: install-cni
-        image: kvswitch/k-vswitch:v0.0.1
+        image: kvswitch/k-vswitch:v0.0.2
         command:
         - /bin/sh
         - -c
