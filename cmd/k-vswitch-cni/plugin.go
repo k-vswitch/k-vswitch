@@ -45,7 +45,10 @@ import (
 // NOTE: portions of the code in this file are copied from
 // github.om/containernetworking/plugins
 
-const defaultBridgeName = "k-vswitch0"
+const (
+	defaultBridgeName = "k-vswitch0"
+	podMacAddr        = "aa:bb:cc:dd:ee:ff"
+)
 
 type NetConf struct {
 	types.NetConf
@@ -219,7 +222,7 @@ func setupVeth(netns ns.NetNS, ifName string) (*current.Interface, *current.Inte
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
 		// TODO don't hardcode the MTU
-		hostVeth, containerVeth, err := setupVethPair(ifName, 1500, hostNS)
+		hostVeth, containerVeth, err := ip.SetupVeth(ifName, 1500, hostNS)
 		if err != nil {
 			return err
 		}
@@ -363,6 +366,24 @@ func cmdAdd(args *skel.CmdArgs) error {
 	hostInterface, containerInterface, err := setupVeth(netns, args.IfName)
 	if err != nil {
 		return err
+	}
+
+	// override container mac addr to fixed addr for all pods
+	err = netns.Do(func(hostNS ns.NetNS) error {
+		link, err := netlink.LinkByName(args.IfName)
+		if err != nil {
+			return err
+		}
+
+		hwAddr, err := net.ParseMAC(podMacAddr)
+		if err != nil {
+			return err
+		}
+
+		return netlink.LinkSetHardwareAddr(link, hwAddr)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to override pod MAC address to %q, err: %v", podMacAddr, err)
 	}
 
 	podNamespace, podName, err := getPodInfo()
