@@ -53,7 +53,7 @@ k-vswitch requires the following information before it can be installed:
 
 * **cluster CIDR**: this is the same cluster CIDR you configured on various components of your cluster via `--cluster-cidr`.
 * **service CIDR**: this is the same service CIDR you configured on the `kube-apiserver` via `--service-cluster-ip-range`.
-* **overlay type**: this is the overlay type to use, currently 'vxlan' and 'gre' are supported. 'gre' is recommended but some
+* **overlay type**: this is the overlay type to use, currently `vxlan` and `gre` are supported. `gre` is recommended but some
            cloud providers may not support it in which case you can use `vxlan`.
 
 Once you have the following, you can install the latest deployment spec, update the k-vswitch configmap based on the above
