@@ -35,7 +35,7 @@ Table of Contents
 
 k-vswitch was designed to be really easy to install and configure on any Kubernetes cluster. The only installation requirement is that OVS (Open vSwitch)
 is installed on every Kubernetes node (i.e `apt install openvswitch-switch`). Once OVS is installed, k-vswitch should be one `kubectl apply` away from working
-on your cluster. See [Installation][#installation] for more details.
+on your cluster. See [Installation](#installation) for more details.
 
 ### Network Policies
 
@@ -50,7 +50,7 @@ high throughput environments. You can learn more about OVS performance in [this 
 
 ### GRE / VxLAN Overlay
 
-k-vswitch supports a simple GRE or VxLAN overlay for cross node networking on your Kubernetes clusters.
+k-vswitch supports a simple GRE or VxLAN overlay for your cluster network.
 
 ### ARP Responder
 
