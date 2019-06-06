@@ -7,11 +7,13 @@ k-vswitch is an easy-to-operate, high performance and secure Kubernetes networki
 Table of Contents
 =================
 
+
    * [k-vswitch](#k-vswitch)
    * [Table of Contents](#table-of-contents)
-      * [Features](#features)
+      * [Why use k-vswitch?](#why-use-k-vswitch)
+         * [Easy to Operate](#easy-to-operate)
          * [Network Policies](#network-policies)
-         * [Performance](#performance)
+         * [High Performance](#high-performance)
          * [GRE / VxLAN Overlay](#gre--vxlan-overlay)
          * [ARP Responder](#arp-responder)
       * [Architecture](#architecture)
@@ -27,14 +29,20 @@ Table of Contents
          * [Install Steps](#install-steps)
       * [Upcoming features](#upcoming-features)
 
-## Features
+## Why use k-vswitch?
+
+### Easy to Operate
+
+k-vswitch was designed to be really easy to install and configure on any Kubernetes cluster. The only installation requirement is that OVS (Open vSwitch)
+is installed on every Kubernetes node (i.e `apt install openvswitch-switch`). Once OVS is installed, k-vswitch should be one `kubectl apply` away from working
+on your cluster. See [Installation][#installation] for more details.
 
 ### Network Policies
 
-k-vswitch supports [Kubernetes Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/) by programming flows on Open vSwitch
-which then matches ingressing/egressing packets on the bridge and only allows packages as specifed by the network policy API.
+k-vswitch supports [Kubernetes Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/) by programming flows on Open vSwitch.
+Flows match against ingressing/egressing packets from pods and will only allow packets as specified by the network policy API.
 
-### Performance
+### High Performance
 
 k-vswitch is performant by nature due to the Open vSwitch Kernel Datapath. The "fast-path" kernel module allows the kernel to
 cache subsequent packets in kernel-space, significantly increasing performance compared to the standard Linux bridge, especially in
@@ -42,17 +50,14 @@ high throughput environments. You can learn more about OVS performance in [this 
 
 ### GRE / VxLAN Overlay
 
-k-vswitch supports GRE and VxLAN overlay for your Kubernetes cluster. GRE is recommended, however, some cloud providers do not allow
-GRE traffic over VM network so you may need to use VxLAN in that case.
+k-vswitch supports a simple GRE or VxLAN overlay for cross node networking on your Kubernetes clusters.
 
 ### ARP Responder
 
-k-vswitch programs flows on the Open vSwitch bridge to automatically send ARP replies to all ARP requests on your pod network. This removes
+k-vswitch programs flows on the OVS bridge to automatically send ARP replies to all ARP requests on your pod network. This removes
 the need for L2 broadcast/learning for pods on your cluster.
 
-
 See [Upcoming features](#upcoming-features) for a list of future improvements/features planned for k-vswitch.
-
 ## Architecture
 
 ### Components
