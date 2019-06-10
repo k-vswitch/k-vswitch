@@ -43,8 +43,9 @@ type Flow struct {
 	output    int
 	resubmit  int
 	drop      bool
-
-	raw string
+	local     bool
+	
+	raw       string
 }
 
 func NewFlow() *Flow {
@@ -117,6 +118,10 @@ func (f *Flow) String() string {
 		actionSet = append(actionSet, "drop")
 	}
 
+	if f.local {
+		actionSet = append(actionSet, "local")
+	}
+
 	actions := fmt.Sprintf("actions=%s", strings.Join(actionSet, ","))
 
 	flow = fmt.Sprintf("%s %s", flow, actions)
@@ -182,32 +187,39 @@ func (f *Flow) WithUDPDestPort(dstPort int) *Flow {
 	return f
 }
 
-func (f *Flow) WithModDlDest(dstMac string) *Flow {
+func (f *Flow) WithRaw(raw string) *Flow {
+	f.raw = raw
+	return f
+}
+
+// Actions that can be applied for a flow
+
+func (f *Flow) WithActionModDlDest(dstMac string) *Flow {
 	f.modDlDest = dstMac
 	return f
 }
 
-func (f *Flow) WithTunnelDest(tunDst string) *Flow {
+func (f *Flow) WithActionTunnelDest(tunDst string) *Flow {
 	f.tunDest = tunDst
 	return f
 }
 
-func (f *Flow) WithOutputPort(output int) *Flow {
+func (f *Flow) WithActionOutputPort(output int) *Flow {
 	f.output = output
 	return f
 }
 
-func (f *Flow) WithDrop() *Flow {
+func (f *Flow) WithActionDrop() *Flow {
 	f.drop = true
 	return f
 }
 
-func (f *Flow) WithResubmit(table int) *Flow {
+func (f *Flow) WithActionResubmit(table int) *Flow {
 	f.resubmit = table
 	return f
 }
 
-func (f *Flow) WithRaw(raw string) *Flow {
-	f.raw = raw
+func (f *Flow) WithActionLocal() *Flow {
+	f.local = true
 	return f
 }

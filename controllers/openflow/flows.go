@@ -114,48 +114,47 @@ func (c *controller) syncFlows() error {
 func (c *controller) defaultFlows() error {
 	// table entry, for now, always go directly to network policies
 	flow := flows.NewFlow().WithTable(tableEntry).
-		WithPriority(1000).WithResubmit(tableNetworkPolicies)
+		WithPriority(1000).WithActionResubmit(tableNetworkPolicies)
 	c.flows.AddFlow(flow)
 
 	// table network policy defaults to table classification
 	// higher priority rules will get added later as network policies are applied
 	flow = flows.NewFlow().WithTable(tableNetworkPolicies).
-		WithPriority(0).WithResubmit(tableClassification)
+		WithPriority(0).WithActionResubmit(tableClassification)
 	c.flows.AddFlow(flow)
 
-	// default to node-local if none of the following classifer flows match
+	// default to local if none of the following classifier flows match
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(0).
-		WithOutputPort(c.nodeLocalOFPort)
+		WithActionLocal()
 	c.flows.AddFlow(flow)
 
-	// any IP traffic for the gatetway should go back out node-local port
+	// any IP traffic for the gateway should go to the bridge port
 	// with a dl destination rewrite to account for traffic from the overlay
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(500).WithProtocol("ip").
-		WithIPDest(c.gatewayIP).WithModDlDest(c.nodeLocalMAC).
-		WithOutputPort(c.nodeLocalOFPort)
+		WithIPDest(c.gatewayIP).WithActionLocal()
 	c.flows.AddFlow(flow)
 
 	// traffic in the local pod CIDR should go straight to tableL2Rewrites
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(300).WithProtocol("ip").WithIPDest(c.podCIDR).
-		WithResubmit(tableL2Rewrites)
+		WithActionResubmit(tableL2Rewrites)
 	c.flows.AddFlow(flow)
 
 	// remaining IP traffic in the cluster CIDR should go to tableL3Forwarding
 	flow = flows.NewFlow().WithTable(tableClassification).
 		WithPriority(100).WithProtocol("ip").
-		WithIPDest(c.clusterCIDR).WithResubmit(tableL3Forwarding)
+		WithIPDest(c.clusterCIDR).WithActionResubmit(tableL3Forwarding)
 	c.flows.AddFlow(flow)
 
 	flow = flows.NewFlow().WithTable(tableClassification).
-		WithPriority(100).WithProtocol("arp").WithResubmit(tableLocalARP)
+		WithPriority(100).WithProtocol("arp").WithActionResubmit(tableLocalARP)
 	c.flows.AddFlow(flow)
 
 	// arp responder for gateway IP
 	rawFlow := fmt.Sprintf("table=%d priority=500 dl_type=0x0806 arp_tpa=%s actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],set_field:%s->arp_sha,set_field:%s->arp_spa,in_port",
-		tableLocalARP, c.gatewayIP, c.nodeLocalMAC, c.nodeLocalMAC, c.gatewayIP)
+		tableLocalARP, c.gatewayIP, c.bridgeMAC, c.bridgeMAC, c.gatewayIP)
 	flow = flows.NewFlow().WithRaw(rawFlow)
 	c.flows.AddFlow(flow)
 
@@ -185,42 +184,42 @@ func (c *controller) flowsForVSwitch(vswitch *v1alpha1.VSwitchConfig) error {
 	if !isCurrentNode {
 		flow := flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(150).WithProtocol("ip").
-			WithIPDest(podCIDR).WithTunnelDest(vswitch.Spec.OverlayIP).
-			WithOutputPort(c.overlayOFPort)
+			WithIPDest(podCIDR).WithActionTunnelDest(vswitch.Spec.OverlayIP).
+			WithActionOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 
 	} else {
 		flow := flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(podCIDR).
-			WithResubmit(tableL2Rewrites)
+			WithActionResubmit(tableL2Rewrites)
 		c.flows.AddFlow(flow)
 	}
 
-	// directly output to node-local port if dest address is the current node,
+	// directly output to local bridge if dest address is the current node,
 	// otherwise route back to overlay
 	nodeIP := vswitch.Spec.OverlayIP
 	if isCurrentNode {
 		flow := flows.NewFlow().WithTable(tableClassification).
 			WithPriority(100).WithProtocol("ip").
 			WithIPDest(nodeIP).WithIPSrc(podCIDR).
-			WithModDlDest(c.nodeLocalMAC).WithOutputPort(c.nodeLocalOFPort)
+			WithActionModDlDest(c.bridgeMAC).WithActionLocal()
 		c.flows.AddFlow(flow)
 
 		flow = flows.NewFlow().WithTable(tableClassification).
 			WithPriority(50).WithProtocol("ip").WithIPDest(nodeIP).
-			WithModDlDest(c.clusterWideMAC).WithOutputPort(c.clusterWideOFPort)
+			WithActionModDlDest(c.clusterWideMAC).WithActionOutputPort(c.clusterWideOFPort)
 		c.flows.AddFlow(flow)
 	} else {
 		// for IP traffic to remote node IP, send to table L3 forwarding
 		flow := flows.NewFlow().WithTable(tableClassification).
 			WithPriority(50).WithProtocol("ip").WithIPDest(nodeIP).
-			WithResubmit(tableL3Forwarding)
+			WithActionResubmit(tableL3Forwarding)
 		c.flows.AddFlow(flow)
 
 		// send IP traffic to remote node IP through tunnel
 		flow = flows.NewFlow().WithTable(tableL3Forwarding).
 			WithPriority(100).WithProtocol("ip").WithIPDest(nodeIP).
-			WithTunnelDest(nodeIP).WithOutputPort(c.overlayOFPort)
+			WithActionTunnelDest(nodeIP).WithActionOutputPort(c.overlayOFPort)
 		c.flows.AddFlow(flow)
 	}
 
@@ -259,8 +258,8 @@ func (c *controller) flowsForPod(pod *corev1.Pod) error {
 	ofport := podPortInfo.ofport
 
 	flow := flows.NewFlow().WithTable(tableL2Rewrites).WithPriority(100).
-		WithProtocol("ip").WithIPDest(podIP).WithModDlDest(podMacAddr).
-		WithOutputPort(ofport)
+		WithProtocol("ip").WithIPDest(podIP).WithActionModDlDest(podMacAddr).
+		WithActionOutputPort(ofport)
 	c.flows.AddFlow(flow)
 
 	// arp responder per pod IP
@@ -339,7 +338,7 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 		// selector match should have default drop action flow
 		// flows added as part of the pod selector match will have high priority
 		flow := flows.NewFlow().WithTable(tableNetworkPolicies).
-			WithPriority(100).WithProtocol("ip").WithIPDest(podIP).WithDrop()
+			WithPriority(100).WithProtocol("ip").WithIPDest(podIP).WithActionDrop()
 		c.flows.AddFlow(flow)
 	}
 
@@ -356,7 +355,7 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 				if len(ing.Ports) == 0 {
 					flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 						WithPriority(1000).WithProtocol("ip").WithIPDest(destIP).
-						WithResubmit(tableClassification)
+						WithActionResubmit(tableClassification)
 					c.flows.AddFlow(flow)
 
 					continue
@@ -369,14 +368,14 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 					if protocol == "tcp" {
 						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 							WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
-							WithIPDest(destIP).WithResubmit(tableClassification)
+							WithIPDest(destIP).WithActionResubmit(tableClassification)
 						c.flows.AddFlow(flow)
 					}
 
 					if protocol == "udp" {
 						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 							WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
-							WithIPDest(destIP).WithResubmit(tableClassification)
+							WithIPDest(destIP).WithActionResubmit(tableClassification)
 						c.flows.AddFlow(flow)
 					}
 
@@ -396,7 +395,7 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 				for _, destIP := range localPodIPs {
 					flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1000).
 						WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
-						WithResubmit(tableClassification)
+						WithActionResubmit(tableClassification)
 					c.flows.AddFlow(flow)
 				}
 
@@ -405,7 +404,7 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 					for _, destIP := range localPodIPs {
 						flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1100).
 							WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
-							WithDrop()
+							WithActionDrop()
 						c.flows.AddFlow(flow)
 					}
 				}
@@ -470,7 +469,7 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 						if len(ing.Ports) == 0 {
 							flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 								WithPriority(1000).WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
-								WithResubmit(tableClassification)
+								WithActionResubmit(tableClassification)
 							c.flows.AddFlow(flow)
 
 							continue
@@ -483,14 +482,14 @@ func (c *controller) flowsForIngressNetworkPolicy(netPol *netv1.NetworkPolicy, l
 							if protocol == "tcp" {
 								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 									WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
-									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+									WithIPSrc(srcIP).WithIPDest(destIP).WithActionResubmit(tableClassification)
 								c.flows.AddFlow(flow)
 							}
 
 							if protocol == "udp" {
 								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 									WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
-									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+									WithIPSrc(srcIP).WithIPDest(destIP).WithActionResubmit(tableClassification)
 								c.flows.AddFlow(flow)
 							}
 
@@ -513,7 +512,7 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 		// selector should have default drop action flow
 		// flows added as part of the pod selector match will have high priority
 		flow := flows.NewFlow().WithTable(tableNetworkPolicies).
-			WithPriority(100).WithProtocol("ip").WithIPSrc(podIP).WithDrop()
+			WithPriority(100).WithProtocol("ip").WithIPSrc(podIP).WithActionDrop()
 		c.flows.AddFlow(flow)
 	}
 
@@ -530,7 +529,7 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 				if len(eg.Ports) == 0 {
 					flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 						WithPriority(1000).WithProtocol("ip").WithIPSrc(srcIP).
-						WithResubmit(tableClassification)
+						WithActionResubmit(tableClassification)
 					c.flows.AddFlow(flow)
 
 					continue
@@ -543,14 +542,14 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 					if protocol == "tcp" {
 						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 							WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
-							WithIPSrc(srcIP).WithResubmit(tableClassification)
+							WithIPSrc(srcIP).WithActionResubmit(tableClassification)
 						c.flows.AddFlow(flow)
 					}
 
 					if protocol == "udp" {
 						flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 							WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
-							WithIPSrc(srcIP).WithResubmit(tableClassification)
+							WithIPSrc(srcIP).WithActionResubmit(tableClassification)
 						c.flows.AddFlow(flow)
 					}
 
@@ -568,7 +567,7 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 				for _, srcIP := range localPodIPs {
 					flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1000).
 						WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
-						WithResubmit(tableClassification)
+						WithActionResubmit(tableClassification)
 					c.flows.AddFlow(flow)
 				}
 
@@ -577,7 +576,7 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 					for _, srcIP := range localPodIPs {
 						flow := flows.NewFlow().WithTable(tableNetworkPolicies).WithPriority(1100).
 							WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
-							WithDrop()
+							WithActionDrop()
 						c.flows.AddFlow(flow)
 					}
 				}
@@ -642,7 +641,7 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 						if len(eg.Ports) == 0 {
 							flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 								WithPriority(1000).WithProtocol("ip").WithIPSrc(srcIP).WithIPDest(destIP).
-								WithResubmit(tableClassification)
+								WithActionResubmit(tableClassification)
 							c.flows.AddFlow(flow)
 
 							continue
@@ -655,14 +654,14 @@ func (c *controller) flowsForEgressNetworkPolicy(netPol *netv1.NetworkPolicy, lo
 							if protocol == "tcp" {
 								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 									WithPriority(1000).WithProtocol("tcp").WithTCPDestPort(portNum).
-									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+									WithIPSrc(srcIP).WithIPDest(destIP).WithActionResubmit(tableClassification)
 								c.flows.AddFlow(flow)
 							}
 
 							if protocol == "udp" {
 								flow := flows.NewFlow().WithTable(tableNetworkPolicies).
 									WithPriority(1000).WithProtocol("udp").WithUDPDestPort(portNum).
-									WithIPSrc(srcIP).WithIPDest(destIP).WithResubmit(tableClassification)
+									WithIPSrc(srcIP).WithIPDest(destIP).WithActionResubmit(tableClassification)
 								c.flows.AddFlow(flow)
 							}
 
